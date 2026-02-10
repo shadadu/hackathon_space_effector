@@ -1,0 +1,39 @@
+<launch>
+
+  <!-- ===================== -->
+  <!-- Load EKF Parameters   -->
+  <!-- ===================== -->
+  <rosparam file="$(find astrobee_grasp)/config/ekf.yaml" command="load"/>
+
+  <!-- ===================== -->
+  <!-- Pose Tracker Node     -->
+  <!-- ===================== -->
+  <!-- Produces /object/pose_tracked -->
+  <node pkg="astrobee_grasp"
+        type="pose_tracker.py"
+        name="pose_tracker"
+        output="screen">
+  </node>
+
+  <!-- ===================== -->
+  <!-- Object EKF Node       -->
+  <!-- ===================== -->
+  <!-- Consumes /object/pose_tracked -->
+  <!-- Publishes /object/state -->
+  <node pkg="astrobee_grasp"
+        type="ekf_node.py"
+        name="object_ekf"
+        output="screen">
+  </node>
+
+  <!-- ===================== -->
+  <!-- TF Broadcaster        -->
+  <!-- ===================== -->
+  <!-- Broadcasts world → object -->
+  <node pkg="astrobee_grasp"
+        type="tf_broadcaster.py"
+        name="object_tf"
+        output="screen">
+  </node>
+
+</launch>
