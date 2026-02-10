@@ -1,87 +1,75 @@
-# =========================================================
-# Base Image: ROS Noetic + Gazebo + RViz
-# =========================================================
-FROM osrf/ros:noetic-desktop-full
+# =======================================
+# Base image: ROS Noetic (Ubuntu 20.04)
+# =======================================
+FROM ros:noetic-ros-core
 
-ENV DEBIAN_FRONTEND=noninteractive
-ENV ROS_DISTRO=noetic
-
-# =========================================================
-# System Dependencies
-# =========================================================
+# =======================================
+# Install basic tools and Python packages
+# =======================================
 RUN apt-get update && apt-get install -y \
     python3-pip \
-    python3-venv \
-    python3-dev \
-    build-essential \
+    python3-catkin-tools \
+    python3-rosdep \
+    python3-rosinstall \
+    python3-rosinstall-generator \
     git \
     wget \
     curl \
-    vim \
-    tmux \
-    x11-apps \
-    mesa-utils \
-    libgl1-mesa-glx \
-    libgl1-mesa-dri \
+    nano \
     && rm -rf /var/lib/apt/lists/*
 
-# =========================================================
-# ROS Python Tools
-# =========================================================
-RUN apt-get update && apt-get install -y \
-    python3-catkin-tools \
-    ros-noetic-tf2-ros \
-    ros-noetic-robot-state-publisher \
-    ros-noetic-gazebo-ros-pkgs \
-    ros-noetic-gazebo-ros-control \
-    && rm -rf /var/lib/apt/lists/*
+# Initialize rosdep
+RUN rosdep init || true
+RUN rosdep update
 
-# =========================================================
-# Create Catkin Workspace
-# =========================================================
+# =======================================
+# Set up catkin workspace
+# =======================================
 ENV CATKIN_WS=/root/catkin_ws
-RUN mkdir -p ${CATKIN_WS}/src
-WORKDIR ${CATKIN_WS}
+RUN mkdir -p $CATKIN_WS/src
+WORKDIR $CATKIN_WS/src
 
-# =========================================================
-# Copy astrobee_grasp Package
-# =========================================================
-COPY astrobee_grasp ${CATKIN_WS}/src/astrobee_grasp
+# =======================================
+# Copy the astrobee_grasp package
+# =======================================
+COPY ./astrobee_grasp ./astrobee_grasp
 
-# =========================================================
-# Python Dependencies (pip only)
-# =========================================================
-RUN pip3 install --upgrade pip
+# REQUIRED for catkin
+RUN echo 'cmake_minimum_required(VERSION 3.0.2)\n\
+include(/opt/ros/noetic/share/catkin/cmake/toplevel.cmake)' \
+> $CATKIN_WS/src/CMakeLists.txt
 
-COPY requirements.txt /tmp/requirements.txt
+
+WORKDIR $CATKIN_WS
+RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
+
+
+
+
+# =======================================
+# Copy requirements.txt and install Python deps
+# =======================================
+COPY ./requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-# =========================================================
-# Build Catkin Workspace
-# =========================================================
-RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && \
-    catkin_make"
+# =======================================
+# Build the catkin workspace
+# =======================================
+WORKDIR $CATKIN_WS
+RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
 
-# =========================================================
-# Environment Setup
-# =========================================================
-RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc && \
-    echo "source ${CATKIN_WS}/devel/setup.bash" >> /root/.bashrc
+# =======================================
+# Source ROS & catkin automatically
+# =======================================
+RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc
+RUN echo "source $CATKIN_WS/devel/setup.bash" >> /root/.bashrc
 
-# =========================================================
-# Default Command
-# =========================================================
-CMD ["/bin/bash"]
+# =======================================
+# Default working directory
+# =======================================
+WORKDIR $CATKIN_WS
 
-# ================================
-# Source ROS on container startup
-# ================================
-RUN echo "source /opt/ros/noetic/setup.bash" >> /root/.bashrc && \
-    echo "source /root/catkin_ws/devel/setup.bash" >> /root/.bashrc
-
-WORKDIR /root/catkin_ws
-
-# ================================
-# Default command
-# ================================
-CMD ["roslaunch", "astrobee_grasp", "perception.launch"]
+# =======================================
+# Default command: launch Gazebo + perception
+# =======================================
+CMD ["roslaunch", "astrobee_grasp", "gazebo_perception.launch"]
