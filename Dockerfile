@@ -13,6 +13,9 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-rospy \
     ros-noetic-tf2 \
     ros-noetic-tf2-ros \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN apt-get update && apt-get install -y \
     ros-noetic-geometry-msgs \
     ros-noetic-sensor-msgs \
     ros-noetic-std-msgs \

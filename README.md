@@ -2,9 +2,15 @@
 1. docker build -t astrobee_grasp:noetic .
 2. 
 # How to launch with Docker
-1. docker run --rm --net=host astrobee_grasp:noetic bash
+1. docker run -it --rm \
+  -e DISPLAY=host.docker.internal:0 \
+  -e QT_X11_NO_MITSHM=1 \
+  -p 11311:11311 \
+  astrobee_grasp:noetic \
+  bash
+
 2. source /opt/ros/noetic/setup.bash
-3. source ~/catkin_ws/devel/setup.bash
+   source ~/catkin_ws/devel/setup.bash
 4. roslaunch astrobee_grasp perception.launch
 
 Some start errors could be lack of memory issues
