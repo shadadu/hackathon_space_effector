@@ -21,7 +21,7 @@
   <!-- Consumes /object/pose_tracked -->
   <!-- Publishes /object/state -->
   <node pkg="astrobee_grasp"
-        type="ekf_node.py"
+        type="object_ekf.py"
         name="object_ekf"
         output="screen">
   </node>
@@ -32,7 +32,7 @@
   <!-- Broadcasts world → object -->
   <node pkg="astrobee_grasp"
         type="tf_broadcaster.py"
-        name="object_tf"
+        name="tf_broadcaster"
         output="screen">
   </node>
 

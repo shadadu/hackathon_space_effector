@@ -1,7 +1,7 @@
 # =======================================
 # Base image: ROS Noetic (Ubuntu 20.04)
 # =======================================
-#FROM --platform=linux/amd64 ros:noetic-ros-core
+FROM --platform=linux/amd64 ros:noetic-ros-core
 #FROM --platform=linux/amd64 ros:noetic-desktop-full
 
 # Install basic tools and Python packages
