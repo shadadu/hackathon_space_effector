@@ -17,9 +17,6 @@ catkin_package()
 
 catkin_install_python(
   PROGRAMS
-    scripts/pose_tracker.py
-    scripts/object_ekf.py
-    scripts/tf_broadcaster.py
-    object_tracking/scripts/object_to_planning_scene.py
+    scripts/object_to_planning_scene.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

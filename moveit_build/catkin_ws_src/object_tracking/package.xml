@@ -2,12 +2,14 @@
 <package format="2">
   <name>object_tracking</name>
   <version>0.0.1</version>
-  <description>Dynamic object tracking and planning scene integration for microgravity grasping</description>
+  <description>
+    Dynamic object tracking integration with MoveIt planning scene
+    for microgravity grasping.
+  </description>
 
-  <maintainer email="user@example.com">Your Name</maintainer>
+  <maintainer email="you@example.com">Your Name</maintainer>
   <license>MIT</license>
 
-  <!-- Build tool -->
   <buildtool_depend>catkin</buildtool_depend>
 
   <!-- Runtime dependencies -->

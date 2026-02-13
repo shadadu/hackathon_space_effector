@@ -1,6 +1,7 @@
 # =======================================
 # Base image: ROS Noetic (Ubuntu 20.04)
 # =======================================
+#FROM ros:noetic-ros-core
 FROM --platform=linux/amd64 ros:noetic-ros-core
 #FROM --platform=linux/amd64 ros:noetic-desktop-full
 
