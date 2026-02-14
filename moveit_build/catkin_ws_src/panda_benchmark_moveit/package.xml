@@ -2,7 +2,7 @@
 <package format="2">
   <name>panda_benchmark_moveit</name>
   <version>0.0.1</version>
-  <description>MoveIt bringup wrapper for Panda benchmarking with OMPL vs DGM.</description>
+  <description>Wrapper MoveIt bringup for Panda benchmarking (OMPL vs DGM service).</description>
 
   <maintainer email="you@example.com">User</maintainer>
   <license>MIT</license>
@@ -10,15 +10,18 @@
   <buildtool_depend>catkin</buildtool_depend>
 
   <depend>roslaunch</depend>
+  <depend>xacro</depend>
+
   <depend>moveit_ros_move_group</depend>
   <depend>moveit_ros_planning</depend>
   <depend>moveit_ros_planning_interface</depend>
   <depend>moveit_msgs</depend>
   <depend>rviz</depend>
+
   <depend>moveit_resources_panda_description</depend>
   <depend>moveit_resources_panda_moveit_config</depend>
-  <depend>xacro</depend>
 
+  <!-- Your project nodes -->
   <depend>object_tracking</depend>
 
   <export/>

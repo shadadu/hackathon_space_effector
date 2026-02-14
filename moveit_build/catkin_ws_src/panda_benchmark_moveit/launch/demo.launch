@@ -2,31 +2,32 @@
   <arg name="rviz" default="false"/>
   <arg name="use_sim_time" default="false"/>
 
-  <!-- Bring up move_group -->
+  <!-- Start MoveIt server -->
   <include file="$(find panda_benchmark_moveit)/launch/move_group.launch">
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
   </include>
 
-  <!-- Start your moving-object planning scene updater -->
+  <!-- Dynamic object -> planning scene -->
   <node pkg="object_tracking"
         type="object_to_planning_scene.py"
         name="object_to_planning_scene"
-        output="screen">
-  </node>
+        output="screen"/>
 
-  <!-- Start your DGM planner service -->
+  <!-- DGM planner service endpoint: /dgm/get_motion_plan -->
   <node pkg="object_tracking"
         type="dgm_planner_node.py"
         name="dgm_planner"
         output="screen">
-    <!-- Override these after we confirm service names -->
     <param name="service_name" value="/dgm/get_motion_plan"/>
+    <!-- IK service name in MoveIt is usually /compute_ik -->
     <param name="ik_service" value="/compute_ik"/>
     <param name="group_name" value="panda_arm"/>
     <param name="ee_link" value="panda_hand"/>
+    <param name="n_points" value="60"/>
+    <param name="duration" value="2.0"/>
   </node>
 
-  <!-- RViz (optional; may crash inside Docker on macOS) -->
+  <!-- Optional RViz (likely to crash inside Docker on macOS) -->
   <group if="$(arg rviz)">
     <node pkg="rviz" type="rviz" name="rviz" output="screen"
           args="-d $(find moveit_resources_panda_moveit_config)/launch/moveit.rviz"/>

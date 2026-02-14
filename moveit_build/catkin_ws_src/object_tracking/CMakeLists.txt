@@ -18,5 +18,7 @@ catkin_package()
 catkin_install_python(
   PROGRAMS
     scripts/object_to_planning_scene.py
+    scripts/dgm_planner_node.py
+    scripts/benchmark_runner.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

@@ -2,15 +2,6 @@ FROM ros:noetic
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Install MoveIt + Python tools (Noetic)
-#RUN apt-get update && apt-get install -y \
-#    ros-noetic-moveit \
-#    ros-noetic-moveit-commander \
-#    ros-noetic-rviz \
-#    python3-catkin-tools \
-#    python3-pip \
-#    && rm -rf /var/lib/apt/lists/*
-
 RUN apt-get update && apt-get install -y \
     ros-noetic-moveit \
     ros-noetic-moveit-commander \
@@ -22,13 +13,12 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*
 
-
 # Create catkin workspace
 RUN mkdir -p /root/catkin_ws/src
 WORKDIR /root/catkin_ws/src
 
-# Copy your ROS package(s) into the workspace
-COPY ./catkin_ws_src/object_tracking ./object_tracking
+# Copy ALL local ROS packages into the workspace
+COPY catkin_ws_src/ /root/catkin_ws/src/
 
 # Build
 WORKDIR /root/catkin_ws
