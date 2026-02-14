@@ -27,6 +27,28 @@
     <param name="duration" value="2.0"/>
   </node>
 
+  <node pkg="object_tracking" type="intercept_planner.py" name="intercept_planner" output="screen">
+  <param name="object_topic" value="/object/state"/>
+  <param name="world_frame" value="world"/>
+  <param name="group_name" value="panda_arm"/>
+  <param name="ee_link" value="panda_hand"/>
+
+  <!-- choose backend -->
+  <param name="ik_service" value="/compute_ik"/>
+  <param name="plan_service" value="/plan_kinematic_path"/> <!-- or /dgm/get_motion_plan -->
+
+  <param name="rate_hz" value="2.0"/>
+  <param name="latency_s" value="0.15"/>
+  <param name="t_min" value="0.2"/>
+  <param name="t_max" value="2.0"/>
+  <param name="t_step" value="0.1"/>
+
+  <param name="grasp_offset_x" value="-0.12"/>
+  <param name="grasp_offset_y" value="0.0"/>
+  <param name="grasp_offset_z" value="0.0"/>
+</node>
+
+
   <!-- Optional RViz (likely to crash inside Docker on macOS) -->
   <group if="$(arg rviz)">
     <node pkg="rviz" type="rviz" name="rviz" output="screen"
