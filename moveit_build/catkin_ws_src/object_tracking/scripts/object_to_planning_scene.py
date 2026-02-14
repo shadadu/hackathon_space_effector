@@ -1,65 +1,75 @@
+#!/usr/bin/env python3
 import rospy
 from nav_msgs.msg import Odometry
-from geometry_msgs.msg import PoseStamped
-from moveit_commander import PlanningSceneInterface
+
 from moveit_msgs.msg import CollisionObject
 from shape_msgs.msg import SolidPrimitive
+from geometry_msgs.msg import Pose
 
 class ObjectPlanningSceneUpdater:
-
     def __init__(self):
-        rospy.init_node("object_to_planning_scene")
+        self.object_topic = rospy.get_param("~object_topic", "/object/state")
+        self.frame_id = rospy.get_param("~frame_id", "world")
+        self.object_id = rospy.get_param("~object_id", "free_object")
 
-        self.scene = PlanningSceneInterface(synchronous=True)
-        rospy.sleep(2)
+        # Simple object geometry (box) — tune later
+        self.size_x = rospy.get_param("~size_x", 0.06)
+        self.size_y = rospy.get_param("~size_y", 0.06)
+        self.size_z = rospy.get_param("~size_z", 0.12)
 
-        self.object_id = "free_object"
-        self.prediction_dt = 0.3  # seconds ahead to compensate latency
+        # If we haven't received state yet, keep object far away to avoid collisions
+        self.spawn_far_x = rospy.get_param("~spawn_far_x", 5.0)
 
-        rospy.Subscriber("/object/state", Odometry, self.state_callback)
+        # Public, stable topic used by MoveIt to receive collision objects
+        self.pub_co = rospy.Publisher("/collision_object", CollisionObject, queue_size=10)
 
-        rospy.loginfo("Object Planning Scene Updater Ready.")
-        rospy.spin()
+        self.last_pose = None
+        rospy.Subscriber(self.object_topic, Odometry, self.state_callback, queue_size=1)
 
-    def state_callback(self, msg):
+        rospy.loginfo("Object Planning Scene Updater Ready. Publishing to /collision_object (id=%s)", self.object_id)
 
-        # Extract pose and velocity
+        # Send an initial far-away object so planning starts collision-free
+        self.publish_object(self.make_far_pose())
+
+    def make_far_pose(self):
+        p = Pose()
+        p.position.x = self.spawn_far_x
+        p.position.y = 0.0
+        p.position.z = 0.0
+        p.orientation.w = 1.0
+        return p
+
+    def state_callback(self, msg: Odometry):
+        # Use incoming pose directly (already in msg.header.frame_id, typically 'world')
         pose = msg.pose.pose
-        twist = msg.twist.twist
 
-        # -----------------------------
-        # Microgravity Prediction
-        # x(t+dt) = x + v*dt
-        # -----------------------------
+        # If frame differs, you can enforce a frame id param; for now trust msg.header.frame_id
+        frame = msg.header.frame_id if msg.header.frame_id else self.frame_id
+        self.publish_object(pose, frame_id=frame)
 
-        predicted_pose = PoseStamped()
-        predicted_pose.header.frame_id = "world"
-        predicted_pose.header.stamp = rospy.Time.now()
-
-        predicted_pose.pose.position.x = pose.position.x + twist.linear.x * self.prediction_dt
-        predicted_pose.pose.position.y = pose.position.y + twist.linear.y * self.prediction_dt
-        predicted_pose.pose.position.z = pose.position.z + twist.linear.z * self.prediction_dt
-
-        predicted_pose.pose.orientation = pose.orientation
-
-        self.update_collision_object(predicted_pose)
-
-    def update_collision_object(self, pose_stamped):
+    def publish_object(self, pose: Pose, frame_id: str = None):
+        if frame_id is None:
+            frame_id = self.frame_id
 
         co = CollisionObject()
+        co.header.stamp = rospy.Time.now()
+        co.header.frame_id = frame_id
         co.id = self.object_id
-        co.header.frame_id = "world"
+        co.operation = CollisionObject.ADD
 
         primitive = SolidPrimitive()
         primitive.type = SolidPrimitive.BOX
-        primitive.dimensions = [0.2, 0.2, 0.2]
+        primitive.dimensions = [self.size_x, self.size_y, self.size_z]
 
         co.primitives = [primitive]
-        co.primitive_poses = [pose_stamped.pose]
-        co.operation = CollisionObject.ADD
+        co.primitive_poses = [pose]
 
-        self.scene._pub_co.publish(co)
+        self.pub_co.publish(co)
 
+def main():
+    rospy.init_node("object_to_planning_scene")
+    ObjectPlanningSceneUpdater()
+    rospy.spin()
 
 if __name__ == "__main__":
-    ObjectPlanningSceneUpdater()
+    main()
