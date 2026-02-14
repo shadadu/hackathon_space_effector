@@ -11,6 +11,40 @@ from moveit_msgs.srv import GetPlanningScene, GetPlanningSceneRequest
 from moveit_msgs.msg import PlanningSceneComponents
 import numpy as np
 
+from sensor_msgs.msg import JointState
+from moveit_msgs.msg import RobotState
+
+from sensor_msgs.msg import JointState
+from moveit_msgs.msg import RobotState
+
+def make_panda_start_state():
+    """
+    Known-good Panda start state for MoveIt requests.
+    Includes arm + hand joints so OMPL doesn't reject the request.
+    """
+    js = JointState()
+    js.name = [
+        # Arm (7 DOF)
+        "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
+        "panda_joint5", "panda_joint6", "panda_joint7",
+        # Extra joints sometimes present in resources URDF
+        "panda_joint8",
+        "panda_hand_joint",
+        # Gripper
+        "panda_finger_joint1", "panda_finger_joint2",
+    ]
+    js.position = [
+        # Arm "ready-ish"
+        0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785,
+        # extras
+        0.0,
+        0.0,
+        # gripper open
+        0.04, 0.04
+    ]
+    rs = RobotState()
+    rs.joint_state = js
+    return rs
 
 def make_goal_constraints_from_pose(goal_pose: PoseStamped,
                                    link_name: str,
@@ -83,6 +117,9 @@ def call_moveit_get_motion_plan(service_name: str, mpr: MotionPlanRequest):
 
 
 def main():
+
+    rospy.sleep(1.0)
+
     rospy.init_node("benchmark_runner")
 
     # ---- Params you must set to match your robot ----
@@ -105,11 +142,14 @@ def main():
 
     # ---- Build MotionPlanRequest ----
     robot = RobotCommander()
-    start_state = robot.get_current_state()  # moveit_msgs/RobotState
 
     mpr = MotionPlanRequest()
     mpr.group_name = group_name
-    mpr.start_state = start_state
+
+    # Prefer the planning scene's current robot_state (more complete than RobotCommander in headless setups)
+    scene = get_planning_scene("/get_planning_scene")
+    mpr.start_state = make_panda_start_state()
+
     mpr.goal_constraints = [make_goal_constraints_from_pose(goal, ee_link)]
     mpr.allowed_planning_time = rospy.get_param("~allowed_planning_time", 2.0)
     mpr.num_planning_attempts = int(rospy.get_param("~num_planning_attempts", 5))

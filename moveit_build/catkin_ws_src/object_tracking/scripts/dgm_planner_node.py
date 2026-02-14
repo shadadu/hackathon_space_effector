@@ -80,7 +80,7 @@ class DGMPlannerService:
             ikreq.ik_request.robot_state = self.robot.get_current_state()
 
         ikreq.ik_request.timeout = rospy.Duration(0.2)
-        ikreq.ik_request.attempts = 2
+        # Noetic moveit_msgs/PositionIKRequest has no 'attempts' field.
 
         t0 = rospy.Time.now()
         ikresp = self.ik(ikreq)
