@@ -9,42 +9,44 @@ from nav_msgs.msg import Odometry
 from moveit_commander import RobotCommander
 from moveit_msgs.srv import GetPlanningScene, GetPlanningSceneRequest
 from moveit_msgs.msg import PlanningSceneComponents
-import numpy as np
 
 from sensor_msgs.msg import JointState
 from moveit_msgs.msg import RobotState
 
-from sensor_msgs.msg import JointState
-from moveit_msgs.msg import RobotState
+# PANDA_EXTENDED = {
+#     "panda_joint1": 0.0,
+#     "panda_joint2": 0.0,
+#     "panda_joint3": 0.0,
+#     "panda_joint4": 0.0,
+#     "panda_joint5": 0.0,
+#     "panda_joint6": 1.571,
+#     "panda_joint7": 0.785,
+# }
+
+PANDA_EXTENDED = {
+    "panda_joint1": 0.0,
+    "panda_joint2": -0.785,
+    "panda_joint3": 0.0,
+    "panda_joint4": -2.356,
+    "panda_joint5": 0.0,
+    "panda_joint6": 1.571,
+    "panda_joint7": 0.785,
+}
+
+PANDA_HAND_OPEN = {
+    "panda_finger_joint1": 0.035,
+    "panda_finger_joint2": 0.035,
+}
 
 def make_panda_start_state():
-    """
-    Known-good Panda start state for MoveIt requests.
-    Includes arm + hand joints so OMPL doesn't reject the request.
-    """
     js = JointState()
-    js.name = [
-        # Arm (7 DOF)
-        "panda_joint1", "panda_joint2", "panda_joint3", "panda_joint4",
-        "panda_joint5", "panda_joint6", "panda_joint7",
-        # Extra joints sometimes present in resources URDF
-        "panda_joint8",
-        "panda_hand_joint",
-        # Gripper
-        "panda_finger_joint1", "panda_finger_joint2",
-    ]
-    js.position = [
-        # Arm "ready-ish"
-        0.0, -0.785, 0.0, -2.356, 0.0, 1.571, 0.785,
-        # extras
-        0.0,
-        0.0,
-        # gripper open
-        0.04, 0.04
-    ]
+    names = list(PANDA_EXTENDED.keys()) + list(PANDA_HAND_OPEN.keys())
+    js.name = names
+    js.position = [PANDA_EXTENDED[n] for n in PANDA_EXTENDED] + [PANDA_HAND_OPEN[n] for n in PANDA_HAND_OPEN]
     rs = RobotState()
     rs.joint_state = js
     return rs
+
 
 def make_goal_constraints_from_pose(goal_pose: PoseStamped,
                                    link_name: str,
@@ -146,9 +148,25 @@ def main():
     mpr = MotionPlanRequest()
     mpr.group_name = group_name
 
-    # Prefer the planning scene's current robot_state (more complete than RobotCommander in headless setups)
     scene = get_planning_scene("/get_planning_scene")
-    mpr.start_state = make_panda_start_state()
+
+    if scene and scene.robot_state and scene.robot_state.joint_state.name:
+        start_state = scene.robot_state
+
+        # Ensure gripper joints exist
+        names = start_state.joint_state.name
+        positions = start_state.joint_state.position
+
+        if "panda_finger_joint1" not in names:
+            names += ["panda_finger_joint1", "panda_finger_joint2"]
+            positions += [0.035, 0.035]
+
+        start_state.joint_state.name = names
+        start_state.joint_state.position = positions
+    else:
+        start_state = make_panda_start_state()
+
+    mpr.start_state = start_state
 
     mpr.goal_constraints = [make_goal_constraints_from_pose(goal, ee_link)]
     mpr.allowed_planning_time = rospy.get_param("~allowed_planning_time", 2.0)
