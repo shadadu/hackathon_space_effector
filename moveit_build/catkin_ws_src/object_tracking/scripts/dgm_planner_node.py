@@ -31,7 +31,7 @@ class DGMPlannerService:
         # IK service name varies; discover via: rosservice list | grep compute_ik
         self.ik_service = rospy.get_param("~ik_service", "/compute_ik")
 
-        rospy.wait_for_service(self.ik_service, timeout=20.0)
+        rospy.wait_for_service(self.ik_service, timeout=50.0)
         self.ik = rospy.ServiceProxy(self.ik_service, GetPositionIK)
 
         # DGM service endpoint

@@ -1,0 +1,34 @@
+<launch>
+  <arg name="rviz" default="false"/>
+  <arg name="use_sim_time" default="false"/>
+
+  <!-- Bring up move_group -->
+  <include file="$(find panda_benchmark_moveit)/launch/move_group.launch">
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+  </include>
+
+  <!-- Start your moving-object planning scene updater -->
+  <node pkg="object_tracking"
+        type="object_to_planning_scene.py"
+        name="object_to_planning_scene"
+        output="screen">
+  </node>
+
+  <!-- Start your DGM planner service -->
+  <node pkg="object_tracking"
+        type="dgm_planner_node.py"
+        name="dgm_planner"
+        output="screen">
+    <!-- Override these after we confirm service names -->
+    <param name="service_name" value="/dgm/get_motion_plan"/>
+    <param name="ik_service" value="/compute_ik"/>
+    <param name="group_name" value="panda_arm"/>
+    <param name="ee_link" value="panda_hand"/>
+  </node>
+
+  <!-- RViz (optional; may crash inside Docker on macOS) -->
+  <group if="$(arg rviz)">
+    <node pkg="rviz" type="rviz" name="rviz" output="screen"
+          args="-d $(find moveit_resources_panda_moveit_config)/launch/moveit.rviz"/>
+  </group>
+</launch>
