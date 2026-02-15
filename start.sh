@@ -4,7 +4,7 @@ set -euo pipefail
 ############################################
 # User-configurable paths / names
 ############################################
-MAIN_WS="${MAIN_WS:-$PWD}"                 # run script from main workspace root
+MAIN_WS="${MAIN_WS:-$PWD}"
 MOVEIT_BUILD_DIR="${MOVEIT_BUILD_DIR:-$MAIN_WS/moveit_build}"
 
 NET_NAME="${NET_NAME:-rosnet}"
@@ -14,19 +14,15 @@ ASTROBEE_NAME="${ASTROBEE_NAME:-astrobee}"
 MOVEIT_NAME="${MOVEIT_NAME:-moveit}"
 
 ROS_MASTER_IMAGE="${ROS_MASTER_IMAGE:-ros:noetic-ros-core}"
-
-# Your images:
 ASTROBEE_IMAGE="${ASTROBEE_IMAGE:-astrobee_grasp:noetic}"
 MOVEIT_IMAGE="${MOVEIT_IMAGE:-moveit_image:noetic}"
 
-# Launch commands inside containers:
 ASTROBEE_LAUNCH="${ASTROBEE_LAUNCH:-roslaunch astrobee_grasp perception.launch}"
 MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rviz:=false}"
 
-# Healthcheck timeouts (seconds)
 MASTER_TIMEOUT="${MASTER_TIMEOUT:-20}"
-ASTROBEE_TIMEOUT="${ASTROBEE_TIMEOUT:-1500}"
-MOVEIT_TIMEOUT="${MOVEIT_TIMEOUT:-1500}"
+ASTROBEE_TIMEOUT="${ASTROBEE_TIMEOUT:-40}"
+MOVEIT_TIMEOUT="${MOVEIT_TIMEOUT:-60}"
 
 ############################################
 # Helpers
@@ -60,6 +56,21 @@ container_ip() {
   docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$name"
 }
 
+# Run a ROS command inside a container with environment sourced properly
+ros_exec() {
+  local container="$1"; shift
+  local cmd="$*"
+  docker exec "$container" bash -lc "
+set -e
+export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
+unset ROS_HOSTNAME
+export ROS_IP=\$(hostname -i | awk '{print \$1}')
+if [ -f /opt/ros/noetic/setup.bash ]; then source /opt/ros/noetic/setup.bash; fi
+if [ -f /root/catkin_ws/devel/setup.bash ]; then source /root/catkin_ws/devel/setup.bash; fi
+$cmd
+"
+}
+
 wait_for_master() {
   log "Waiting for ROS master to respond..."
   local start
@@ -68,15 +79,14 @@ wait_for_master() {
   counter=1
   max=10
   while [ $counter -le $max ]; do
-    counter=$((counter + 1))
-    # test TCP connectivity from inside ros_master container itself
+    counter=$((counter+1))
     if docker exec "$ROS_MASTER_NAME" bash -lc "python3 - <<'PY'
 import socket
 s=socket.socket(); s.settimeout(1)
 try:
   s.connect(('127.0.0.1',11311))
   print('ok')
-except Exception as e:
+except Exception:
   raise SystemExit(1)
 finally:
   s.close()
@@ -105,12 +115,9 @@ wait_for_topic_publisher() {
   counter=1
   max=10
   while [ $counter -le $max ]; do
-    counter=$((counter + 1))
-    if docker exec "$container" bash -lc "rostopic info $topic 2>/dev/null | grep -q '^Publishers:.*None'"; then
-      : # no publisher yet
-    elif docker exec "$container" bash -lc "rostopic info $topic 2>/dev/null | grep -q '^Publishers:'"; then
-      # ensure not None
-      if ! docker exec "$container" bash -lc "rostopic info $topic 2>/dev/null | grep -q '^Publishers: *None'"; then
+    counter=$((counter+1))
+    if ros_exec "$container" "rostopic info $topic 2>/dev/null | grep -q '^Publishers:'" ; then
+      if ! ros_exec "$container" "rostopic info $topic 2>/dev/null | grep -q '^Publishers: *None'" ; then
         ok "Publisher detected for $topic"
         return 0
       fi
@@ -135,9 +142,8 @@ wait_for_rostopic_echo_once() {
   log "Waiting for a message on: $topic (container=$container)"
   counter=1
   max=10
-  while [ $counter -le $max ]; do
-    counter=$((counter + 1))
-    if docker exec "$container" bash -lc "timeout 2 rostopic echo -n 1 $topic >/dev/null 2>&1"; then
+  while true; do
+    if ros_exec "$container" "timeout 2 rostopic echo -n 1 $topic >/dev/null 2>&1" ; then
       ok "Received at least one message on $topic"
       return 0
     fi
@@ -151,26 +157,28 @@ wait_for_rostopic_echo_once() {
   done
 }
 
-wait_for_service() {
+wait_for_service_any() {
   local container="$1"
-  local srv="$2"
-  local timeout="$3"
+  local timeout="$2"
+  shift 2
+  local services=("$@")
   local start
   start="$(date +%s)"
 
-  log "Waiting for service: $srv (container=$container)"
-  counter=1
-  max=10
-  while [ $counter -le $max ]; do
-    counter=$((counter + 1))
-    if docker exec "$container" bash -lc "rosservice list 2>/dev/null | grep -qx '$srv'"; then
-      ok "Service available: $srv"
-      return 0
-    fi
+  log "Waiting for any service: ${services[*]} (container=$container)"
+  while true; do
+    for s in "${services[@]}"; do
+      if ros_exec "$container" "rosservice list 2>/dev/null | grep -qx '$s'" ; then
+        ok "Service available: $s"
+        echo "$s"
+        return 0
+      fi
+    done
+
     local now
     now="$(date +%s)"
     if (( now - start > timeout )); then
-      fail "Timed out waiting for service $srv"
+      fail "Timed out waiting for any of: ${services[*]}"
     fi
     sleep 1
   done
@@ -180,7 +188,7 @@ check_param() {
   local container="$1"
   local param="$2"
   log "Checking param exists: $param"
-  if docker exec "$container" bash -lc "rosparam get '$param' >/dev/null 2>&1"; then
+  if ros_exec "$container" "rosparam get '$param' >/dev/null 2>&1" ; then
     ok "Param exists: $param"
   else
     fail "Param missing: $param"
@@ -197,32 +205,23 @@ cd "$MAIN_WS"
 
 ensure_network
 
-############################################
-# Start ROS master
-############################################
+# ROS master
 docker_rm_if_exists "$ROS_MASTER_NAME"
-
-log "Starting ROS master container: $ROS_MASTER_NAME"
-# Map port to host for debugging; inside rosnet it’s still reachable as ros_master:11311
+log "Starting ROS master: $ROS_MASTER_NAME"
 docker run -d --name "$ROS_MASTER_NAME" --network "$NET_NAME" -p 11311:11311 \
   "$ROS_MASTER_IMAGE" roscore >/dev/null
-
 ok "Started $ROS_MASTER_NAME (IP=$(container_ip "$ROS_MASTER_NAME"))"
 wait_for_master
 
-############################################
-# Start Astrobee container + launch perception
-############################################
+# Astrobee
 docker_rm_if_exists "$ASTROBEE_NAME"
-
 log "Starting Astrobee container: $ASTROBEE_NAME"
 docker run -d --name "$ASTROBEE_NAME" --network "$NET_NAME" \
   -e ROS_MASTER_URI="http://$ROS_MASTER_NAME:11311" \
   "$ASTROBEE_IMAGE" bash -lc "tail -f /dev/null" >/dev/null
-
 ok "Started $ASTROBEE_NAME (IP=$(container_ip "$ASTROBEE_NAME"))"
 
-log "Launching Astrobee perception: $ASTROBEE_LAUNCH"
+log "Launching Astrobee perception"
 docker exec -d "$ASTROBEE_NAME" bash -lc "
 export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
 unset ROS_HOSTNAME
@@ -232,27 +231,22 @@ source /root/catkin_ws/devel/setup.bash || true
 $ASTROBEE_LAUNCH
 " >/dev/null
 
-# Checks: object/state should have publisher and produce a message
 wait_for_topic_publisher "$ASTROBEE_NAME" "/object/state" "$ASTROBEE_TIMEOUT"
 wait_for_rostopic_echo_once "$ASTROBEE_NAME" "/object/state" "$ASTROBEE_TIMEOUT"
-ok "Astrobee perception appears to be publishing /object/state"
+ok "Astrobee publishing /object/state"
 
-############################################
-# Start MoveIt container + launch demo
-############################################
+# MoveIt
 log "Switching to MoveIt build dir: $MOVEIT_BUILD_DIR"
 cd "$MOVEIT_BUILD_DIR" || fail "MoveIt build dir not found: $MOVEIT_BUILD_DIR"
 
 docker_rm_if_exists "$MOVEIT_NAME"
-
 log "Starting MoveIt container: $MOVEIT_NAME"
 docker run -d --name "$MOVEIT_NAME" --network "$NET_NAME" \
   -e ROS_MASTER_URI="http://$ROS_MASTER_NAME:11311" \
   "$MOVEIT_IMAGE" bash -lc "tail -f /dev/null" >/dev/null
-
 ok "Started $MOVEIT_NAME (IP=$(container_ip "$MOVEIT_NAME"))"
 
-log "Launching MoveIt demo: $MOVEIT_LAUNCH"
+log "Launching MoveIt demo"
 docker exec -d "$MOVEIT_NAME" bash -lc "
 export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
 unset ROS_HOSTNAME
@@ -262,50 +256,28 @@ source /root/catkin_ws/devel/setup.bash
 $MOVEIT_LAUNCH
 " >/dev/null
 
-# Checks: MoveIt sees object topic from Astrobee
-wait_for_topic_publisher "$ASTROBEE_NAME" "/object/state" "$MOVEIT_TIMEOUT"
+# Confirm MoveIt can see the Astrobee topic
 wait_for_rostopic_echo_once "$MOVEIT_NAME" "/object/state" "$MOVEIT_TIMEOUT"
-ok "MoveIt container can see /object/state from Astrobee"
+ok "MoveIt can receive /object/state"
 
-# Checks: MoveGroup services / DGM service
-wait_for_service "$MOVEIT_NAME" "/compute_ik" "$MOVEIT_TIMEOUT" || true
-# OMPL planning service name can vary; check both common names
-if docker exec "$MOVEIT_NAME" bash -lc "rosservice list | grep -qx '/plan_kinematic_path'"; then
-  ok "OMPL planning service available: /plan_kinematic_path"
-elif docker exec "$MOVEIT_NAME" bash -lc "rosservice list | grep -qx '/move_group/plan_kinematic_path'"; then
-  ok "OMPL planning service available: /move_group/plan_kinematic_path"
+# Services & params
+# Service names can be either global or under /move_group depending on config
+IK_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/compute_ik" "/move_group/compute_ik")"
+PLAN_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/plan_kinematic_path" "/move_group/plan_kinematic_path")"
+DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/dgm/get_motion_plan")"
+
+ok "Found IK service: $IK_SVC"
+ok "Found planning service: $PLAN_SVC"
+ok "Found DGM service: $DGM_SVC"
+
+# controller manager param can be global or private depending on launch
+if ros_exec "$MOVEIT_NAME" "rosparam get /move_group/moveit_controller_manager >/dev/null 2>&1"; then
+  ok "Param exists: /move_group/moveit_controller_manager"
+elif ros_exec "$MOVEIT_NAME" "rosparam get /moveit_controller_manager >/dev/null 2>&1"; then
+  ok "Param exists: /moveit_controller_manager"
 else
-  warn "Could not find plan_kinematic_path service yet (may still be starting)"
+  fail "Param missing: /move_group/moveit_controller_manager or /moveit_controller_manager"
 fi
 
-# DGM service (your node advertises it)
-wait_for_service "$MOVEIT_NAME" "/dgm/get_motion_plan" "$MOVEIT_TIMEOUT"
-
-# Controller manager param (must exist under /move_group)
-check_param "$MOVEIT_NAME" "/move_group/moveit_controller_manager"
-
-# Optional: collision object topic subscriber check (MoveIt subscribes)
-if docker exec "$MOVEIT_NAME" bash -lc "rostopic info /collision_object 2>/dev/null | grep -q 'Subscribers:'"; then
-  ok "MoveIt subscribes to /collision_object"
-else
-  warn "Could not confirm /collision_object subscribers (non-fatal)"
-fi
-
-log "Stack is up."
-ok "ros_master + astrobee perception + moveit demo are running on $NET_NAME"
-
-cat <<EOF
-
-Next commands (optional):
-  # View logs
-  docker logs -f $ASTROBEE_NAME
-  docker logs -f $MOVEIT_NAME
-
-  # Enter containers
-  docker exec -it $ASTROBEE_NAME bash
-  docker exec -it $MOVEIT_NAME bash
-
-  # Run intercept planner (inside moveit container shell)
-  rosrun object_tracking intercept_planner.py _plan_service:=/dgm/get_motion_plan _ik_service:=/compute_ik _world_frame:=world
-
-EOF
+log "Stack is up and basic checks passed."
+ok "ros_master + astrobee + moveit are running on network '$NET_NAME'"
