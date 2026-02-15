@@ -20,6 +20,8 @@ WORKDIR /root/catkin_ws/src
 # Copy ALL local ROS packages into the workspace
 COPY catkin_ws_src/ /root/catkin_ws/src/
 
+
+
 # Build
 WORKDIR /root/catkin_ws
 RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"

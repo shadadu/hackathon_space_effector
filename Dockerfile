@@ -78,6 +78,8 @@ RUN apt-get update && rosdep install --from-paths src --ignore-src -r -y && rm -
 COPY ./requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
+
+
 # =======================================
 # Build the catkin workspace
 # =======================================
