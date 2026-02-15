@@ -9,6 +9,8 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-franka-description \
     ros-noetic-moveit-resources-panda-description \
     ros-noetic-moveit-resources-panda-moveit-config \
+    ros-noetic-robot-state-publisher \
+    ros-noetic-joint-state-publisher \
     python3-catkin-tools \
     python3-pip \
     && rm -rf /var/lib/apt/lists/*

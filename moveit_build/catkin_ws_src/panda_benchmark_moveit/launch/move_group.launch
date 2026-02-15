@@ -1,56 +1,42 @@
 <launch>
   <arg name="use_sim_time" default="false"/>
-  <!-- Fallback global param -->
-  <param name="moveit_controller_manager" value="moveit_fake_controller_manager/MoveItFakeControllerManager"/>
-
-
   <param name="use_sim_time" value="$(arg use_sim_time)"/>
 
-  <!-- Load robot description (URDF/Xacro) -->
   <param name="robot_description"
          command="$(find xacro)/xacro '$(find moveit_resources_panda_description)/urdf/panda.urdf'"/>
 
-  <!-- Load semantic description (SRDF) -->
   <param name="robot_description_semantic"
          textfile="$(find moveit_resources_panda_moveit_config)/config/panda.srdf"/>
 
-  <!-- Kinematics, joint limits, OMPL config from the resource config package -->
+  <!-- NEW: joint states + TF -->
+  <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
+    <param name="rate" value="50"/>
+  </node>
+
+  <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+    <param name="publish_frequency" value="50.0"/>
+  </node>
+
+
+  <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_panda"
+        args="0 0 0 0 0 0 world panda_link0" />
+
+  <!-- configs -->
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/kinematics.yaml"/>
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/joint_limits.yaml"/>
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/ompl_planning.yaml"/>
 
-  <!-- Controllers: use fake controllers for benchmarking (no hardware) -->
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/fake_controllers.yaml"/>
   <param name="moveit_controller_manager" value="moveit_fake_controller_manager/MoveItFakeControllerManager"/>
 
-
-  <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_panda"
-      args="0 0 0 0 0 0 world panda_link0" />
-
-  <!-- Publish Panda TF from robot_description -->
-  <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
-  <param name="publish_frequency" value="50.0"/>
-  </node>
-
-   <!-- Provide joint states for robot_state_publisher (fake joint state publisher) -->
-  <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
-  <param name="rate" value="50"/>
-  </node>
-
-
-  <!-- Move group -->
   <node pkg="moveit_ros_move_group" type="move_group" name="move_group" output="screen">
-  <param name="planning_plugin" value="ompl_interface/OMPLPlanner"/>
-  <param name="request_adapters"
-         value="default_planner_request_adapters/AddTimeParameterization
-                default_planner_request_adapters/FixWorkspaceBounds
-                default_planner_request_adapters/FixStartStateBounds
-                default_planner_request_adapters/FixStartStateCollision
-                default_planner_request_adapters/FixStartStatePathConstraints"/>
-  <param name="start_state_max_bounds_error" value="0.1"/>
-
-  <!-- IMPORTANT: private param for controller manager -->
-  <param name="moveit_controller_manager" value="moveit_fake_controller_manager/MoveItFakeControllerManager"/>
-</node>
-
+    <param name="planning_plugin" value="ompl_interface/OMPLPlanner"/>
+    <param name="request_adapters"
+           value="default_planner_request_adapters/AddTimeParameterization
+                  default_planner_request_adapters/FixWorkspaceBounds
+                  default_planner_request_adapters/FixStartStateBounds
+                  default_planner_request_adapters/FixStartStateCollision
+                  default_planner_request_adapters/FixStartStatePathConstraints"/>
+    <param name="start_state_max_bounds_error" value="0.1"/>
+  </node>
 </launch>
