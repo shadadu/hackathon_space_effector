@@ -71,6 +71,24 @@ $cmd
 "
 }
 
+make_scripts_executable() {
+  local container="$1"
+  shift
+  local dirs=("$@")
+
+  log "Ensuring Python scripts are executable in container: $container"
+
+  for d in "${dirs[@]}"; do
+    ros_exec "$container" "
+if [ -d '$d' ]; then
+  find '$d' -type f -name '*.py' -exec chmod +x {} \;
+fi
+"
+  done
+
+  ok "Executable permissions enforced."
+}
+
 wait_for_master() {
   log "Waiting for ROS master to respond..."
   local start
@@ -221,6 +239,9 @@ docker run -d --name "$ASTROBEE_NAME" --network "$NET_NAME" \
   "$ASTROBEE_IMAGE" bash -lc "tail -f /dev/null" >/dev/null
 ok "Started $ASTROBEE_NAME (IP=$(container_ip "$ASTROBEE_NAME"))"
 
+make_scripts_executable "$ASTROBEE_NAME" \
+  "/root/catkin_ws/src/astrobee_grasp/scripts"
+
 log "Launching Astrobee perception"
 docker exec -d "$ASTROBEE_NAME" bash -lc "
 export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
@@ -245,6 +266,9 @@ docker run -d --name "$MOVEIT_NAME" --network "$NET_NAME" \
   -e ROS_MASTER_URI="http://$ROS_MASTER_NAME:11311" \
   "$MOVEIT_IMAGE" bash -lc "tail -f /dev/null" >/dev/null
 ok "Started $MOVEIT_NAME (IP=$(container_ip "$MOVEIT_NAME"))"
+
+make_scripts_executable "$MOVEIT_NAME" \
+  "/root/catkin_ws/src/object_tracking/scripts"
 
 log "Launching MoveIt demo"
 docker exec -d "$MOVEIT_NAME" bash -lc "
