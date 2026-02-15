@@ -174,6 +174,8 @@ class InterceptPlanner:
         req.ik_request.robot_state = self.start_state
         req.ik_request.timeout = rospy.Duration(0.15)
         resp = self.ik(req)
+        if resp.error_code.val != 1:
+            rospy.logdebug("IK fail code=%d", resp.error_code.val)
         return resp.error_code.val == 1
 
     def choose_intercept_time(self, odom: Odometry):
