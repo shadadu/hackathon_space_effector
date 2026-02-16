@@ -19,7 +19,12 @@ public:
     state_.reset(new moveit::core::RobotState(kmodel_));
     state_->setToDefaultValues();
 
-    srv_ = nh_.advertiseService("/get_jacobian", &JacobianServer::handle, this);
+//    srv_ = nh_.advertiseService("/get_jacobian", &JacobianServer::handle, this);
+
+    ros::NodeHandle nh;
+    srv_ = nh.advertiseService("/get_jacobian", &JacobianServer::handle, this);
+
+
     ROS_INFO("Jacobian server ready on /get_jacobian");
   }
 

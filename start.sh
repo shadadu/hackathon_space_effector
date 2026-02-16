@@ -21,8 +21,8 @@ ASTROBEE_LAUNCH="${ASTROBEE_LAUNCH:-roslaunch astrobee_grasp perception.launch}"
 MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rviz:=false}"
 
 MASTER_TIMEOUT="${MASTER_TIMEOUT:-20}"
-ASTROBEE_TIMEOUT="${ASTROBEE_TIMEOUT:-40}"
-MOVEIT_TIMEOUT="${MOVEIT_TIMEOUT:-60}"
+ASTROBEE_TIMEOUT="${ASTROBEE_TIMEOUT:-100}"
+MOVEIT_TIMEOUT="${MOVEIT_TIMEOUT:-200}"
 
 ############################################
 # Helpers
@@ -224,7 +224,8 @@ check_param() {
 
 start_and_test_jacobian_server() {
   local container="$1"
-  local timeout="$2"
+#  local timeout="$2"
+  local timeout=100
 
   log "== Jacobian server: toolchain check (gcc/g++) =="
   ros_exec "$container" "
@@ -304,7 +305,37 @@ PY" || fail "Jacobian test call failed"
   ok "Jacobian server built, launched, and validated."
 }
 
+jacobian_service_test(){
+  log "Testing /get_jacobian service (Panda)..."
+ros_exec "$MOVEIT_NAME" "python3 - <<'PY'
+import rospy
+from geometry_msgs.msg import Point
+from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
+rospy.init_node('test_get_jacobian', anonymous=True, disable_signals=True)
+rospy.wait_for_service('/get_jacobian', timeout=10.0)
+srv = rospy.ServiceProxy('/get_jacobian', GetJacobian)
+
+req = GetJacobianRequest()
+req.group_name = 'panda_arm'
+req.link_name = 'panda_hand'
+req.joint_names = ['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7']
+req.joint_positions = [0.0,0.0,0.0,0.0,0.0,1.571,0.785]
+req.reference_point = Point(0,0,0)
+
+resp = srv(req)
+print('message:', resp.message)
+print('rows, cols:', resp.rows, resp.cols)
+assert resp.message == 'OK'
+assert resp.rows == 6 and resp.cols == 7
+assert len(resp.jacobian) == resp.rows * resp.cols
+print('OK Jacobian length:', len(resp.jacobian))
+PY"
+ok "Jacobian service test passed."
+
+
+
+}
 ############################################
 # Main
 ############################################
@@ -324,7 +355,8 @@ ok "Started $ROS_MASTER_NAME (IP=$(container_ip "$ROS_MASTER_NAME"))"
 wait_for_master
 
 # Astrobee
-docker_rm_if_exists "$ASTROBEE_NAME"
+docker_rm_if_exists "$ASTROBEE_NAME" log "Building Astrobee container: $ASTROBEE_NAME"
+docker build -t "$ASTROBEE_IMAGE" .
 log "Starting Astrobee container: $ASTROBEE_NAME"
 docker run -d --name "$ASTROBEE_NAME" --network "$NET_NAME" \
   -e ROS_MASTER_URI="http://$ROS_MASTER_NAME:11311" \
@@ -352,7 +384,8 @@ ok "Astrobee publishing /object/state"
 log "Switching to MoveIt build dir: $MOVEIT_BUILD_DIR"
 cd "$MOVEIT_BUILD_DIR" || fail "MoveIt build dir not found: $MOVEIT_BUILD_DIR"
 
-docker_rm_if_exists "$MOVEIT_NAME"
+docker_rm_if_exists "$MOVEIT_NAME" log "Building MoveIt Container: $MOVEIT_NAME"
+docker build -t "$MOVEIT_IMAGE" .
 log "Starting MoveIt container: $MOVEIT_NAME"
 docker run -d --name "$MOVEIT_NAME" --network "$NET_NAME" \
   -e ROS_MASTER_URI="http://$ROS_MASTER_NAME:11311" \
@@ -382,23 +415,33 @@ source /root/catkin_ws/devel/setup.bash
 $MOVEIT_LAUNCH
 " >/dev/null
 
-# Start + test Jacobian server (requires robot_description from MoveIt launch)
-start_and_test_jacobian_server "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
+## Start + test Jacobian server (requires robot_description from MoveIt launch)
+#start_and_test_jacobian_server "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
+#
+#jacobian_service_test "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
 
 
 # Confirm MoveIt can see the Astrobee topic
 wait_for_rostopic_echo_once "$MOVEIT_NAME" "/object/state" "$MOVEIT_TIMEOUT"
 ok "MoveIt can receive /object/state"
 
+# Start + test Jacobian server (requires robot_description from MoveIt launch)
+start_and_test_jacobian_server "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
+
+jacobian_service_test "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
+
 # Services & params
 # Service names can be either global or under /move_group depending on config
 IK_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/compute_ik" "/move_group/compute_ik")"
 PLAN_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/plan_kinematic_path" "/move_group/plan_kinematic_path")"
 DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/dgm/get_motion_plan")"
+#JAC_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/get_jacobian")"
+JAC_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/get_jacobian" "/jacobian_server/get_jacobian")"
 
 ok "Found IK service: $IK_SVC"
 ok "Found planning service: $PLAN_SVC"
 ok "Found DGM service: $DGM_SVC"
+ok "Found Jacobian service: $JAC_SVC"
 
 # controller manager param can be global or private depending on launch
 if ros_exec "$MOVEIT_NAME" "rosparam get /move_group/moveit_controller_manager >/dev/null 2>&1"; then
