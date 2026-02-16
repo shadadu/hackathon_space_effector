@@ -150,19 +150,35 @@ class InterceptPlanner:
         ps.pose.orientation = odom.pose.pose.orientation  # V1: constant orientation
         return ps
 
+    def quat_rotate(q, v):
+        # q = (x,y,z,w), v=(vx,vy,vz)
+        x, y, z, w = q
+        vx, vy, vz = v
+        # v' = q * (v,0) * q_conj
+        # Compute quaternion product quickly
+        # t = 2 * cross(q_vec, v)
+        tx = 2.0 * (y * vz - z * vy)
+        ty = 2.0 * (z * vx - x * vz)
+        tz = 2.0 * (x * vy - y * vx)
+        # v' = v + w*t + cross(q_vec, t)
+        vpx = vx + w * tx + (y * tz - z * ty)
+        vpy = vy + w * ty + (z * tx - x * tz)
+        vpz = vz + w * tz + (x * ty - y * tx)
+        return vpx, vpy, vpz
+
     def make_grasp_goal(self, obj_pose: PoseStamped) -> PoseStamped:
-        """
-        V1 grasp goal: translate in object frame by fixed offset (ignoring rotation coupling).
-        For now, apply offset in WORLD axes (simple). Next iteration: apply in object frame using quaternion rotation.
-        """
         g = PoseStamped()
-        g.header = Header(stamp=rospy.Time.now(), frame_id=obj_pose.header.frame_id)
+        g.header.stamp = rospy.Time.now()
+        g.header.frame_id = obj_pose.header.frame_id
 
-        g.pose.position.x = obj_pose.pose.position.x + self.grasp_offset_x
-        g.pose.position.y = obj_pose.pose.position.y + self.grasp_offset_y
-        g.pose.position.z = obj_pose.pose.position.z + self.grasp_offset_z
+        q = obj_pose.pose.orientation
+        ox, oy, oz = self.grasp_offset_x, self.grasp_offset_y, self.grasp_offset_z
+        dx, dy, dz = quat_rotate((q.x, q.y, q.z, q.w), (ox, oy, oz))
 
-        # Keep same orientation as object (V1)
+        g.pose.position.x = obj_pose.pose.position.x + dx
+        g.pose.position.y = obj_pose.pose.position.y + dy
+        g.pose.position.z = obj_pose.pose.position.z + dz
+
         g.pose.orientation = obj_pose.pose.orientation
         return g
 
