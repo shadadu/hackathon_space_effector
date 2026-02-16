@@ -211,8 +211,6 @@ PY" >/dev/null 2>&1; then
   done
 }
 
-}
-
 check_param() {
   local container="$1"
   local param="$2"
@@ -223,6 +221,89 @@ check_param() {
     fail "Param missing: $param"
   fi
 }
+
+start_and_test_jacobian_server() {
+  local container="$1"
+  local timeout="$2"
+
+  log "== Jacobian server: toolchain check (gcc/g++) =="
+  ros_exec "$container" "
+command -v gcc >/dev/null || { echo 'gcc missing'; exit 1; }
+command -v g++ >/dev/null || { echo 'g++ missing'; exit 1; }
+gcc --version | head -n 1
+g++ --version | head -n 1
+" || fail "C++ toolchain missing in $container (install build-essential in Dockerfile)"
+
+  log "== Jacobian server: catkin build =="
+  ros_exec "$container" "
+cd /root/catkin_ws
+catkin_make
+" || fail "catkin_make failed in $container (jacobian_server build)"
+
+  log "== Jacobian server: start node in background =="
+  docker exec -d "$container" bash -lc "
+set -e
+export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
+unset ROS_HOSTNAME
+export ROS_IP=\$(hostname -i | awk '{print \$1}')
+source /opt/ros/noetic/setup.bash || true
+source /root/catkin_ws/devel/setup.bash || true
+rosrun jacobian_server jacobian_server_node
+" >/dev/null
+
+  log "== Jacobian server: wait for /get_jacobian =="
+  local start
+  start="$(date +%s)"
+  while true; do
+    if ros_exec "$container" "python3 - <<'PY'
+import sys, rosgraph
+m = rosgraph.Master('/wait_get_jacobian')
+try:
+    m.lookupService('/get_jacobian')
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+PY" >/dev/null 2>&1; then
+      ok "Service available: /get_jacobian"
+      break
+    fi
+    local now
+    now="$(date +%s)"
+    if (( now - start > timeout )); then
+      fail "Timed out waiting for /get_jacobian"
+    fi
+    sleep 1
+  done
+
+  log "== Jacobian server: test call (Panda) =="
+  ros_exec "$container" "python3 - <<'PY'
+import rospy
+from geometry_msgs.msg import Point
+from jacobian_server.srv import GetJacobian, GetJacobianRequest
+
+rospy.init_node('test_get_jacobian', anonymous=True, disable_signals=True)
+rospy.wait_for_service('/get_jacobian', timeout=10.0)
+srv = rospy.ServiceProxy('/get_jacobian', GetJacobian)
+
+req = GetJacobianRequest()
+req.group_name = 'panda_arm'
+req.link_name = 'panda_hand'
+req.joint_names = ['panda_joint1','panda_joint2','panda_joint3','panda_joint4','panda_joint5','panda_joint6','panda_joint7']
+req.joint_positions = [0.0,0.0,0.0,0.0,0.0,1.571,0.785]
+req.reference_point = Point(0,0,0)
+
+resp = srv(req)
+print('message:', resp.message)
+print('rows, cols:', resp.rows, resp.cols)
+assert resp.message == 'OK'
+assert resp.rows == 6 and resp.cols == 7
+assert len(resp.jacobian) == resp.rows * resp.cols
+print('OK Jacobian length:', len(resp.jacobian))
+PY" || fail "Jacobian test call failed"
+
+  ok "Jacobian server built, launched, and validated."
+}
+
 
 ############################################
 # Main
@@ -290,6 +371,10 @@ source /opt/ros/noetic/setup.bash
 source /root/catkin_ws/devel/setup.bash
 $MOVEIT_LAUNCH
 " >/dev/null
+
+# Start + test Jacobian server (requires robot_description from MoveIt launch)
+start_and_test_jacobian_server "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
+
 
 # Confirm MoveIt can see the Astrobee topic
 wait_for_rostopic_echo_once "$MOVEIT_NAME" "/object/state" "$MOVEIT_TIMEOUT"
