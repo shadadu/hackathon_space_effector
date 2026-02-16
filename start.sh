@@ -186,7 +186,16 @@ wait_for_service_any() {
   log "Waiting for any service: ${services[*]} (container=$container)"
   while true; do
     for s in "${services[@]}"; do
-      if ros_exec "$container" "rosservice list 2>/dev/null | grep -qx '$s'" ; then
+      if ros_exec "$container" "python3 - <<'PY'
+import os, sys
+import rosgraph
+m = rosgraph.Master('/svc_check')
+try:
+    m.lookupService('${s}')
+    sys.exit(0)
+except Exception:
+    sys.exit(1)
+PY" >/dev/null 2>&1; then
         ok "Service available: $s"
         echo "$s"
         return 0
@@ -200,6 +209,8 @@ wait_for_service_any() {
     fi
     sleep 1
   done
+}
+
 }
 
 check_param() {
