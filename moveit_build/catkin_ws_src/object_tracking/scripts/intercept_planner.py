@@ -13,6 +13,9 @@ from shape_msgs.msg import SolidPrimitive
 
 import tf2_ros
 
+import threading
+
+
 
 def make_robot_state_from_joint_dict(joint_dict):
     js = JointState()
@@ -321,6 +324,25 @@ class InterceptPlanner:
         resp = self.plan(req)
         return resp.motion_plan_response
 
+    def call_planner_with_timeout(self, goal, timeout_s=3.0):
+        result = {"resp": None, "err": None}
+
+        def worker():
+            try:
+                result["resp"] = self.call_planner(goal)
+            except Exception as e:
+                result["err"] = e
+
+        th = threading.Thread(target=worker, daemon=True)
+        th.start()
+        th.join(timeout_s)
+        if th.is_alive():
+            rospy.logwarn("Planner timed out after %.2fs", timeout_s)
+            return None
+        if result["err"] is not None:
+            raise result["err"]
+        return result["resp"]
+
     def on_timer(self, _evt):
         if self.last_odom is None:
             return
@@ -338,9 +360,15 @@ class InterceptPlanner:
                       t_hit, self.latency_s,
                       goal.pose.position.x, goal.pose.position.y, goal.pose.position.z)
 
-        plan_resp = self.call_planner(goal)
+        plan_resp = self.call_planner_with_timeout(goal, timeout_s=self.allowed_planning_time + 1.0)
+        if plan_resp is None:
+            return
+
         rospy.loginfo("Planner(%s) error_code=%d planning_time=%.3f",
                       self.plan_service, plan_resp.error_code.val, plan_resp.planning_time)
+
+    def call_planner_with_timeout(self, goal, timeout_s):
+        pass
 
 
 def main():
