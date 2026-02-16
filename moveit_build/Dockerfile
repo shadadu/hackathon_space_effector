@@ -13,6 +13,7 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-joint-state-publisher \
     python3-catkin-tools \
     python3-pip \
+    build-essential \
     && rm -rf /var/lib/apt/lists/*
 
 # Create catkin workspace
