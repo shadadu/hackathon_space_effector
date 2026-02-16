@@ -17,7 +17,7 @@
     <param name="publish_frequency" value="50.0"/>
   </node>
 
-  <node pkg="jacobian_server" type="jacobian_server_node" name="jacobian_server" output="screen" />
+<!--   <node pkg="jacobian_server" type="jacobian_server_node" name="jacobian_server" output="screen" /> -->
 
   <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_panda"
         args="0 0 0 0 0 0 world panda_link0" />
