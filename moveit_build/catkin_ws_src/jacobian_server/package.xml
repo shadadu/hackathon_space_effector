@@ -17,6 +17,10 @@
   <exec_depend>geometry_msgs</exec_depend>
   <exec_depend>message_runtime</exec_depend>
 
+  <!-- MoveIt core + ROS planning layer (RobotModelLoader lives here) -->
   <build_depend>moveit_core</build_depend>
   <exec_depend>moveit_core</exec_depend>
+
+  <build_depend>moveit_ros_planning</build_depend>
+  <exec_depend>moveit_ros_planning</exec_depend>
 </package>
