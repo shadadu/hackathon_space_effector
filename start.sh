@@ -187,8 +187,7 @@ wait_for_service_any() {
   while true; do
     for s in "${services[@]}"; do
       if ros_exec "$container" "python3 - <<'PY'
-import os, sys
-import rosgraph
+import sys, rosgraph
 m = rosgraph.Master('/svc_check')
 try:
     m.lookupService('${s}')
@@ -210,6 +209,7 @@ PY" >/dev/null 2>&1; then
     sleep 1
   done
 }
+
 
 check_param() {
   local container="$1"
