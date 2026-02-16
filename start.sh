@@ -362,6 +362,16 @@ ok "Started $MOVEIT_NAME (IP=$(container_ip "$MOVEIT_NAME"))"
 make_scripts_executable "$MOVEIT_NAME" \
   "/root/catkin_ws/src/object_tracking/scripts"
 
+log "Checking C++ toolchain + building MoveIt workspace (for jacobian_server)..."
+ros_exec "$MOVEIT_NAME" "
+command -v gcc >/dev/null || { echo 'gcc missing'; exit 1; }
+command -v g++ >/dev/null || { echo 'g++ missing'; exit 1; }
+cd /root/catkin_ws
+catkin_make
+"
+ok "catkin_make succeeded (jacobian_server build ready)"
+
+
 log "Launching MoveIt demo"
 docker exec -d "$MOVEIT_NAME" bash -lc "
 export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
