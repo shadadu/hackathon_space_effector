@@ -12,7 +12,7 @@ To start:
 1. In the project root dir, run ./start.sh to boot up the docker containers: 
     rosnet(bridge network), ros_master, astrobee_grasp, moveit
     start.sh brings up the stack and runs tests on the environment, and test that
-    the servers can communicate via ROS and send messages. 
+    the servers can communicate via ROS and send and receive messages. 
     It also runs diagnostic tests of the pose, intercept, and trajectory planners. 
 2. Run ./stop.sh to stop the services and tear down the stack
 
