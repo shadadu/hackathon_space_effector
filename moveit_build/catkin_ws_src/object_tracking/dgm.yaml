@@ -1,0 +1,26 @@
+# DGM (position-only) rollout/training defaults
+
+T: 2.0
+dt: 0.02
+
+# Joint control penalty (diag)
+R_diag: [0.15, 0.15, 0.15, 0.15, 0.15, 0.15, 0.15]
+
+# Conservative velocity limits (rad/s)
+vel_limits: [1.5, 1.5, 1.5, 1.8, 1.8, 2.0, 2.0]
+
+# Training
+iters: 4000
+batch: 256
+lr: 0.0003
+hidden: 256
+depth: 4
+
+Qp: 10.0
+Qp_terminal: 80.0
+
+device: cpu
+out_path: /root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pt
+fk_service: /compute_fk
+ee_link: panda_hand
+frame: world

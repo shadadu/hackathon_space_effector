@@ -1,183 +1,247 @@
 #!/usr/bin/env python3
-import rospy
+import os
+import time
+import threading
+import queue
 import numpy as np
+import rospy
+import torch
+import torch.optim as optim
 
 from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
-from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes, RobotTrajectory
-from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest
-from trajectory_msgs.msg import JointTrajectoryPoint
-from moveit_commander import RobotCommander
+from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
+from moveit_commander import MoveGroupCommander
 
-from geometry_msgs.msg import Point
-
-# Jacobian service
-try:
-    from jacobian_server.srv import GetJacobian, GetJacobianRequest
-    HAS_JACOBIAN_SRV = True
-except Exception:
-    HAS_JACOBIAN_SRV = False
+from object_tracking.dgm_model import load_checkpoint, DGMValueNet
+from object_tracking.dgm_rollout import rollout_value_policy
+from object_tracking.hjb_loss import terminal_loss
+from object_tracking.fk_client import FKClient
 
 
-def interpolate_joints(q0, q1, n=50, duration=2.0):
-    q0 = np.array(q0, dtype=float)
-    q1 = np.array(q1, dtype=float)
-    pts = []
-    for i in range(n):
-        a = i / max(n - 1, 1)
-        q = (1 - a) * q0 + a * q1
-        t = a * duration
-        pts.append((q.tolist(), t))
-    return pts
+def panda_joint_limits():
+    jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
+    jmax = np.array([ 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973], dtype=np.float64)
+    return jmin, jmax
+
+
+class OnlineFineTuner(threading.Thread):
+    """
+    Background fine-tuner: does small terminal-loss updates around recent (q, goal) samples.
+    This is safe and fast, and sets up the pipeline for full HJB fine-tune next.
+    """
+    def __init__(self, model_ref, model_lock, joint_names, fk: FKClient, device="cpu",
+                 lr=1e-4, steps_per_wake=10, time_budget_s=0.05, QpT=80.0):
+        super().__init__(daemon=True)
+        self.model_ref = model_ref
+        self.model_lock = model_lock
+        self.joint_names = joint_names
+        self.fk = fk
+        self.device = device
+        self.lr = lr
+        self.steps_per_wake = steps_per_wake
+        self.time_budget_s = time_budget_s
+        self.QpT = QpT
+
+        self.buf = []  # list of (q0(7,), goal_pos(3,))
+        self.buf_lock = threading.Lock()
+        self.wake = threading.Event()
+        self.stop_flag = threading.Event()
+
+        self.opt = None
+
+    def update_buffer(self, q0, goal_pos, maxlen=128):
+        with self.buf_lock:
+            self.buf.append((np.array(q0, dtype=np.float64), np.array(goal_pos, dtype=np.float64)))
+            if len(self.buf) > maxlen:
+                self.buf = self.buf[-maxlen:]
+        self.wake.set()
+
+    def run(self):
+        while not self.stop_flag.is_set():
+            self.wake.wait(timeout=0.5)
+            self.wake.clear()
+            if self.stop_flag.is_set():
+                break
+
+            # Snapshot buffer
+            with self.buf_lock:
+                if not self.buf:
+                    continue
+                batch = self.buf[-32:]  # small batch
+
+            t_start = time.time()
+
+            # Grab model
+            with self.model_lock:
+                model = self.model_ref["model"]
+                if model is None:
+                    continue
+                model.train()
+                if self.opt is None:
+                    self.opt = optim.Adam(model.parameters(), lr=self.lr)
+
+            # Train a few steps within time budget
+            steps = 0
+            while steps < self.steps_per_wake and (time.time() - t_start) < self.time_budget_s:
+                # Random minibatch
+                idx = np.random.choice(len(batch), size=min(16, len(batch)), replace=False)
+                q_np = np.stack([batch[i][0] for i in idx], axis=0)
+                g_np = np.stack([batch[i][1] for i in idx], axis=0)
+
+                # Terminal targets via FK
+                phi = []
+                for i in range(q_np.shape[0]):
+                    try:
+                        p = self.fk.ee_position(self.joint_names, q_np[i])
+                        e = p - g_np[i]
+                        phi.append(self.QpT * float(np.dot(e, e)))
+                    except Exception:
+                        phi.append(1e3)
+                phi = torch.tensor(phi, dtype=torch.float32, device=self.device)
+
+                q = torch.tensor(q_np, dtype=torch.float32, device=self.device)
+                tT = torch.ones((q.shape[0], 1), dtype=torch.float32, device=self.device)  # t=1
+                g = torch.tensor(g_np, dtype=torch.float32, device=self.device)
+
+                x = torch.cat([q, tT, g], dim=-1)
+                with self.model_lock:
+                    V = self.model_ref["model"](x)
+
+                loss = terminal_loss(V, phi)
+
+                with self.model_lock:
+                    self.opt.zero_grad(set_to_none=True)
+                    loss.backward()
+                    torch.nn.utils.clip_grad_norm_(self.model_ref["model"].parameters(), 5.0)
+                    self.opt.step()
+
+                steps += 1
+
+            with self.model_lock:
+                self.model_ref["model"].eval()
 
 
 class DGMPlannerService:
     def __init__(self):
-        self.robot = RobotCommander()
+        self.service_name = rospy.get_param("~service_name", "/dgm/get_motion_plan")
 
         self.group_name = rospy.get_param("~group_name", "panda_arm")
         self.ee_link = rospy.get_param("~ee_link", "panda_hand")
         self.world_frame = rospy.get_param("~world_frame", "world")
 
-        # IK service
-        self.ik_service = rospy.get_param("~ik_service", "/compute_ik")
-        rospy.wait_for_service(self.ik_service, timeout=50.0)
-        self.ik = rospy.ServiceProxy(self.ik_service, GetPositionIK)
+        # rollout params
+        self.T = float(rospy.get_param("~T", 2.0))
+        self.dt = float(rospy.get_param("~dt", 0.02))
+        self.R_diag = np.array(rospy.get_param("~R_diag", [0.15]*7), dtype=np.float64)
+        self.vel_limits = np.array(rospy.get_param("~vel_limits", [1.5,1.5,1.5,1.8,1.8,2.0,2.0]), dtype=np.float64)
 
-        # Jacobian service (optional but recommended)
-        self.jacobian_service = rospy.get_param("~jacobian_service", "/get_jacobian")
-        self.get_jacobian = None
-        if HAS_JACOBIAN_SRV:
-            try:
-                rospy.loginfo("Waiting for Jacobian service: %s", self.jacobian_service)
-                rospy.wait_for_service(self.jacobian_service, timeout=20.0)
-                self.get_jacobian = rospy.ServiceProxy(self.jacobian_service, GetJacobian)
-                rospy.loginfo("Jacobian service connected: %s", self.jacobian_service)
-            except Exception as e:
-                rospy.logwarn("Jacobian service not available (%s). Continuing without it.", str(e))
+        self.jmin, self.jmax = panda_joint_limits()
+
+        # model
+        self.device = rospy.get_param("~device", "cpu")
+        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pt")
+
+        self.model_ref = {"model": None, "meta": {}}
+        self.model_lock = threading.Lock()
+
+        # Load model if present
+        if os.path.exists(self.model_path):
+            model, meta = load_checkpoint(self.model_path, device=self.device)
+            with self.model_lock:
+                self.model_ref["model"] = model
+                self.model_ref["meta"] = meta
+            rospy.loginfo("Loaded DGM checkpoint: %s", self.model_path)
         else:
-            rospy.logwarn("jacobian_server.srv not importable in this environment. "
-                          "Did you build/source jacobian_server? Continuing without it.")
+            rospy.logwarn("No checkpoint at %s (run rosrun object_tracking dgm_pretrain.py).", self.model_path)
 
-        # DGM service endpoint
-        self.service_name = rospy.get_param("~service_name", "/dgm/get_motion_plan")
+        # Active joints
+        group = MoveGroupCommander(self.group_name)
+        self.active_joints = group.get_active_joints()
+        if len(self.active_joints) != 7:
+            raise RuntimeError(f"Expected 7 active joints for {self.group_name}, got {len(self.active_joints)}")
+
+        # FK client for online fine-tune
+        self.fk = FKClient(service="/compute_fk", ee_link=self.ee_link, frame=self.world_frame)
+
+        # Online fine-tune config
+        self.enable_finetune = bool(rospy.get_param("~enable_finetune", True))
+        self.ft_lr = float(rospy.get_param("~finetune_lr", 1e-4))
+        self.ft_steps = int(rospy.get_param("~finetune_steps_per_wake", 10))
+        self.ft_budget = float(rospy.get_param("~finetune_time_budget_s", 0.05))
+        self.QpT = float(rospy.get_param("~Qp_terminal", 80.0))
+
+        self.finetuner = None
+        if self.enable_finetune:
+            self.finetuner = OnlineFineTuner(
+                model_ref=self.model_ref,
+                model_lock=self.model_lock,
+                joint_names=self.active_joints,
+                fk=self.fk,
+                device=self.device,
+                lr=self.ft_lr,
+                steps_per_wake=self.ft_steps,
+                time_budget_s=self.ft_budget,
+                QpT=self.QpT,
+            )
+            self.finetuner.start()
+            rospy.loginfo("Online fine-tune ENABLED (lr=%g steps=%d budget=%gs)", self.ft_lr, self.ft_steps, self.ft_budget)
+
         self.srv = rospy.Service(self.service_name, GetMotionPlan, self.handle)
+        rospy.loginfo("DGM service ready: %s", self.service_name)
 
-        rospy.loginfo("DGM planner service up: %s (IK: %s)", self.service_name, self.ik_service)
+    def extract_goal_pos(self, mpr):
+        pc = mpr.goal_constraints[0].position_constraints[0]
+        pose = pc.constraint_region.primitive_poses[0]
+        return np.array([pose.position.x, pose.position.y, pose.position.z], dtype=np.float64)
 
-    def query_jacobian(self, group_name, ee_link, joint_names, joint_positions, reference_point=(0.0, 0.0, 0.0)):
-        """
-        Returns J as numpy array (rows x cols), usually 6 x N.
-        """
-        if self.get_jacobian is None:
-            return None
-
-        req = GetJacobianRequest()
-        req.group_name = group_name
-        req.link_name = ee_link
-        req.joint_names = list(joint_names)
-        req.joint_positions = list(joint_positions)
-        req.reference_point = Point(*reference_point)
-
-        resp = self.get_jacobian(req)
-        if resp.message != "OK" or resp.rows <= 0 or resp.cols <= 0:
-            raise rospy.ServiceException(f"Jacobian service failed: {resp.message}")
-
-        J = np.array(resp.jacobian, dtype=float).reshape(resp.rows, resp.cols)
-        return J
+    def start_q0(self, mpr):
+        if mpr.start_state and mpr.start_state.joint_state.name:
+            s_map = dict(zip(mpr.start_state.joint_state.name, mpr.start_state.joint_state.position))
+            return np.array([s_map[j] for j in self.active_joints], dtype=np.float64)
+        # fallback: mid-range
+        return np.zeros(7, dtype=np.float64)
 
     def handle(self, req):
-        """
-        req.motion_plan_request is a MotionPlanRequest
-        Return GetMotionPlanResponse containing MotionPlanResponse
-        """
         mpr = req.motion_plan_request
 
         resp = MotionPlanResponse()
-        resp.error_code = MoveItErrorCodes()
+        resp.error_code.val = MoveItErrorCodes.SUCCESS
         resp.planning_time = 0.0
 
         if not mpr.goal_constraints:
-            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
-            return GetMotionPlanResponse(motion_plan_response=resp)
-
-        # Extract goal pose from first PositionConstraint primitive_pose
-        try:
-            pc = mpr.goal_constraints[0].position_constraints[0]
-            goal_pose = pc.constraint_region.primitive_poses[0]
-            goal_frame = pc.header.frame_id if pc.header.frame_id else self.world_frame
-        except Exception:
             resp.error_code.val = MoveItErrorCodes.INVALID_GOAL_CONSTRAINTS
             return GetMotionPlanResponse(motion_plan_response=resp)
 
-        # IK request
-        ikreq = GetPositionIKRequest()
-        ikreq.ik_request.group_name = mpr.group_name or self.group_name
-        ikreq.ik_request.ik_link_name = self.ee_link
-        ikreq.ik_request.pose_stamped.header.frame_id = goal_frame
-        ikreq.ik_request.pose_stamped.pose = goal_pose
-
-        # Seed state
-        if mpr.start_state and mpr.start_state.joint_state.name:
-            start_state = mpr.start_state
-        else:
-            start_state = self.robot.get_current_state()
-
-        ikreq.ik_request.robot_state = start_state
-        ikreq.ik_request.timeout = rospy.Duration(0.2)
-
-        t0 = rospy.Time.now()
-        ikresp = self.ik(ikreq)
-        resp.planning_time = (rospy.Time.now() - t0).to_sec()
-
-        if ikresp.error_code.val != MoveItErrorCodes.SUCCESS:
-            resp.error_code.val = ikresp.error_code.val
+        with self.model_lock:
+            model = self.model_ref["model"]
+        if model is None:
+            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
             return GetMotionPlanResponse(motion_plan_response=resp)
 
-        # Active joints in group order
-        group = self.robot.get_group(mpr.group_name or self.group_name)
-        active_joints = group.get_active_joints()
+        goal_pos = self.extract_goal_pos(mpr)
+        q0 = self.start_q0(mpr)
+        q0 = np.minimum(np.maximum(q0, self.jmin), self.jmax)
 
-        # Joint maps
-        start_map = dict(zip(start_state.joint_state.name, start_state.joint_state.position))
-        goal_map = dict(zip(ikresp.solution.joint_state.name, ikresp.solution.joint_state.position))
+        # Queue for online fine-tune (non-blocking)
+        if self.enable_finetune and self.finetuner is not None:
+            self.finetuner.update_buffer(q0, goal_pos)
 
-        try:
-            q0 = [start_map[j] for j in active_joints]
-            q1 = [goal_map[j] for j in active_joints]
-        except KeyError:
-            resp.error_code.val = MoveItErrorCodes.INVALID_ROBOT_STATE
-            return GetMotionPlanResponse(motion_plan_response=resp)
-
-        # ---- NEW: Jacobian calls (start + goal) ----
-        # This is where you'll later use HJB/DGM policy:
-        # u* = -R^{-1}(V_q + J^T V_r)
-        try:
-            J0 = self.query_jacobian(mpr.group_name or self.group_name, self.ee_link, active_joints, q0)
-            J1 = self.query_jacobian(mpr.group_name or self.group_name, self.ee_link, active_joints, q1)
-            if J0 is not None:
-                Jlin0 = J0[0:3, :]
-                rospy.loginfo_throttle(2.0, "Jacobian(start) shape=%s, lin-norm=%.3f",
-                                       str(J0.shape), float(np.linalg.norm(Jlin0)))
-            if J1 is not None:
-                Jlin1 = J1[0:3, :]
-                rospy.loginfo_throttle(2.0, "Jacobian(goal) shape=%s, lin-norm=%.3f",
-                                       str(J1.shape), float(np.linalg.norm(Jlin1)))
-        except Exception as e:
-            rospy.logwarn_throttle(2.0, "Jacobian query failed: %s", str(e))
-
-        # Placeholder planner: interpolation (keep for now)
-        npts = int(rospy.get_param("~n_points", 60))
-        duration = float(rospy.get_param("~duration", 2.0))
-        pts = interpolate_joints(q0, q1, n=npts, duration=duration)
-
-        traj = RobotTrajectory()
-        traj.joint_trajectory.joint_names = active_joints
-        for q, t in pts:
-            p = JointTrajectoryPoint()
-            p.positions = q
-            p.time_from_start = rospy.Duration.from_sec(t)
-            traj.joint_trajectory.points.append(p)
-
+        t0 = time.time()
+        with self.model_lock:
+            traj = rollout_value_policy(
+                model=self.model_ref["model"],
+                q0=q0,
+                goal_pos=goal_pos,
+                active_joints=self.active_joints,
+                T=self.T,
+                dt=self.dt,
+                R_diag=self.R_diag,
+                vel_limits=self.vel_limits,
+                joint_min=self.jmin,
+                joint_max=self.jmax,
+                device=self.device,
+            )
+        resp.planning_time = float(time.time() - t0)
         resp.trajectory = traj
         resp.error_code.val = MoveItErrorCodes.SUCCESS
         return GetMotionPlanResponse(motion_plan_response=resp)

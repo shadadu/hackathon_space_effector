@@ -7,6 +7,19 @@
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
   </include>
 
+  <rosparam file="$(find object_tracking)/config/dgm.yaml" command="load"/>
+
+  <node pkg="object_tracking"
+        type="dgm_planner_node.py"
+        name="dgm_planner"
+        output="screen">
+    <param name="service_name" value="/dgm/get_motion_plan"/>
+    <param name="ik_service" value="/compute_ik"/>
+    <param name="jacobian_service" value="/get_jacobian"/>
+    <param name="model_path" value="$(find object_tracking)/models/panda_dgm_v1.pt"/>
+    <param name="use_jacobian_hook" value="false"/>
+  </node>
+
   <!-- Dynamic object -> planning scene -->
   <node pkg="object_tracking"
         type="object_to_planning_scene.py"
@@ -47,7 +60,6 @@
   <param name="grasp_offset_y" value="0.0"/>
   <param name="grasp_offset_z" value="0.0"/>
 </node>
-
 
   <!-- Optional RViz (likely to crash inside Docker on macOS) -->
   <group if="$(arg rviz)">
