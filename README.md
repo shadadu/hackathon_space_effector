@@ -7,7 +7,7 @@ Stack:
 2. MoveIt: https://moveit.picknik.ai/main/index.html
 
 # Running the services
-The stack provides an environment for researching and testing Optimal Control and Deep Learning based trajectory planners and executors.
+The stack provides a simulation platform for researching and testing micro-gravity environment Optimal Control and Deep Learning based trajectory planners and executors.
 To start:
 1. In the project root dir, run ./start.sh to boot up the docker containers: 
     rosnet(bridge network), ros_master, astrobee_grasp, moveit
