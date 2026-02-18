@@ -20,6 +20,16 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-joint-state-publisher \
     && rm -rf /var/lib/apt/lists/*
 
+#RUN #python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
+# CPU-only PyTorch (works in most docker-on-mac setups)
+#RUN #python3 -m pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+
+# ---- Python ML deps ----
+RUN apt-get update && apt-get install -y python3-pip && \
+    pip3 install --no-cache-dir torch torchvision
+
+
+
 # Create catkin workspace
 RUN mkdir -p /root/catkin_ws/src
 WORKDIR /root/catkin_ws/src

@@ -7,8 +7,7 @@
     <arg name="use_sim_time" value="$(arg use_sim_time)"/>
   </include>
 
-  <!-- Load DGM params (T, dt, R_diag, vel_limits, finetune settings, etc.) -->
-  <rosparam file="$(find object_tracking)/config/dgm.yaml" command="load"/>
+
 
   <!-- DGM planner service endpoint -->
   <node pkg="object_tracking"
@@ -19,6 +18,9 @@
     <param name="group_name" value="panda_arm"/>
     <param name="ee_link" value="panda_hand"/>
     <param name="world_frame" value="world"/>
+
+    <!-- Load DGM params (T, dt, R_diag, vel_limits, finetune settings, etc.) -->
+    <rosparam file="$(find object_tracking)/config/dgm.yaml" command="load"/>
 
     <!-- checkpoint -->
     <param name="model_path" value="$(find object_tracking)/models/panda_dgm_v1.pt"/>

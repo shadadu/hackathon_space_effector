@@ -222,7 +222,7 @@ except Exception:
     sys.exit(1)
 PY" >/dev/null 2>&1; then
         ok "Service available: $s"
-        echo "$s"
+#        echo "$s"
         return 0
       fi
     done
@@ -523,8 +523,10 @@ log "Discovering IK / Plan / DGM / Jacobian services"
 
 IK_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/compute_ik" "/move_group/compute_ik" || true)"
 PLAN_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/plan_kinematic_path" "/move_group/plan_kinematic_path" || true)"
-#DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/dgm/get_motion_plan" || true)"
+start_dgm_service "$MOVEIT_NAME"
+DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/dgm/get_motion_plan" || true)"
 #DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" 20 "/dgm/get_motion_plan" || true)"
+
 #if [[ -z "${DGM_SVC:-}" ]]; then
 #  warn "DGM service not found; starting dgm_planner_node manually..."
 #  start_dgm_service "$MOVEIT_NAME"
