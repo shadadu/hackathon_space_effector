@@ -27,15 +27,6 @@ WORKDIR /root/catkin_ws/src
 # Copy ALL local ROS packages into the workspace
 COPY catkin_ws_src/ /root/catkin_ws/src/
 
-#WORKDIR /root/catkin_ws/src
-#COPY object_tracking ./object_tracking
-#COPY jacobian_server ./jacobian_server
-#COPY panda_benchmark_moveit ./panda_benchmark_moveit
-
-
-
-
-
 
 # Build
 WORKDIR /root/catkin_ws
