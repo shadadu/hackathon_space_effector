@@ -63,6 +63,7 @@ def main():
 
     t0 = time.time()
     for it in range(1, iters + 1):
+        rospy.loginfo("Running iter %s: ", it)
         q_np = np.random.uniform(jmin, jmax, (batch, 7)).astype(np.float64)
         t_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
         g_np = sample_goals(batch)
@@ -82,8 +83,9 @@ def main():
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
+
         V = model(build_input(q, t, g))
-        loss_pde = hjb_residual_loss(V, q, t, l, R_inv_diag)
+        loss_pde = hjb_residual_loss(V, q, t, l, R_inv_diag) # hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag)
 
         # terminal batch
         bt = max(64, batch // 3)
