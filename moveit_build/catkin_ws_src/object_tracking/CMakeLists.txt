@@ -24,5 +24,7 @@ catkin_install_python(
     scripts/benchmark_runner.py
     scripts/intercept_planner.py
     scripts/dgm_pretrain.py
+    scripts/dgm_dataset_gen.py
+    scripts/benchmark_100_trials.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

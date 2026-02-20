@@ -4,7 +4,7 @@ set -euo pipefail
 set -x  # optional: comment out if too verbose
 
 LAST_STEP="start"
-trap 'ec=$?; echo -e "\n\033[1;33m[DEBUG]\033[0m bringup_stack.sh exiting (code=$ec) at step=$LAST_STEP"; exit $ec' EXIT
+trap 'ec=$?; echo -e "\n\033[1;33m[DEBUG]\033[0m start.sh exiting (code=$ec) at step=$LAST_STEP"; exit $ec' EXIT
 
 
 ############################################
@@ -196,7 +196,7 @@ nohup rosrun object_tracking dgm_planner_node.py \
   _ik_service:=/compute_ik \
   _group_name:=panda_arm \
   _ee_link:=panda_hand \
-  > /root/bringup_logs/dgm_planner.log 2>&1 &
+  > /root/start_logs/dgm_planner.log 2>&1 &
 " >/dev/null
 }
 
@@ -258,18 +258,18 @@ PY" >/dev/null 2>&1; then
     fi
 
     # If roslaunch crashed, show logs immediately
-    if ! docker exec "$container" bash -lc "test -f /root/bringup_logs/moveit_demo.pid && ps -p \$(cat /root/bringup_logs/moveit_demo.pid) >/dev/null 2>&1"; then
+    if ! docker exec "$container" bash -lc "test -f /root/start_logs/moveit_demo.pid && ps -p \$(cat /root/start_logs/moveit_demo.pid) >/dev/null 2>&1"; then
       warn "MoveIt launch process is not running (crashed or never started). Showing last 120 log lines:"
-      docker exec "$container" bash -lc "tail -n 120 /root/bringup_logs/moveit_demo.log 2>/dev/null || true"
+      docker exec "$container" bash -lc "tail -n 120 /root/start_logs/moveit_demo.log 2>/dev/null || true"
       fail "MoveIt launch not running; cannot get $param"
-      docker exec "$container" bash -lc "echo '--- moveit_demo.log ---'; cat /root/bringup_logs/moveit_demo.log 2>/dev/null || true"
+      docker exec "$container" bash -lc "echo '--- moveit_demo.log ---'; cat /root/start_logs/moveit_demo.log 2>/dev/null || true"
     fi
 
     local now; now="$(date +%s)"
     if (( now - start > timeout )); then
       warn "Timed out waiting for $param. Diagnostics:"
       ros_exec "$container" "rosnode list | head -n 50 || true" || true
-      docker exec "$container" bash -lc "tail -n 200 /root/bringup_logs/moveit_demo.log 2>/dev/null || true"
+      docker exec "$container" bash -lc "tail -n 200 /root/start_logs/moveit_demo.log 2>/dev/null || true"
       fail "Timed out waiting for $param"
     fi
     sleep 1
@@ -478,19 +478,19 @@ export ROS_IP=\$(hostname -i | awk '{print \$1}')
 source /opt/ros/noetic/setup.bash
 source /root/catkin_ws/devel/setup.bash
 
-mkdir -p /root/bringup_logs
-echo '[bringup] starting moveit launch...' > /root/bringup_logs/moveit_demo.log
-echo '[bringup] ROS_MASTER_URI='\"\$ROS_MASTER_URI\" >> /root/bringup_logs/moveit_demo.log
-echo '[bringup] ROS_IP='\"\$ROS_IP\" >> /root/bringup_logs/moveit_demo.log
+mkdir -p /root/start_logs
+echo '[bringup] starting moveit launch...' > /root/start_logs/moveit_demo.log
+echo '[bringup] ROS_MASTER_URI='\"\$ROS_MASTER_URI\" >> /root/start_logs/moveit_demo.log
+echo '[bringup] ROS_IP='\"\$ROS_IP\" >> /root/start_logs/moveit_demo.log
 
 # Preflight: prove rospack can find package
-rospack find panda_benchmark_moveit >> /root/bringup_logs/moveit_demo.log 2>&1 || true
-rospack find moveit_resources_panda_description >> /root/bringup_logs/moveit_demo.log 2>&1 || true
-rospack find moveit_resources_panda_moveit_config >> /root/bringup_logs/moveit_demo.log 2>&1 || true
+rospack find panda_benchmark_moveit >> /root/start_logs/moveit_demo.log 2>&1 || true
+rospack find moveit_resources_panda_description >> /root/start_logs/moveit_demo.log 2>&1 || true
+rospack find moveit_resources_panda_moveit_config >> /root/start_logs/moveit_demo.log 2>&1 || true
 
 # Launch in background, always append logs
-nohup roslaunch panda_benchmark_moveit demo.launch rviz:=false >> /root/bringup_logs/moveit_demo.log 2>&1 &
-echo \$! > /root/bringup_logs/moveit_demo.pid
+nohup roslaunch panda_benchmark_moveit demo.launch rviz:=false >> /root/start_logs/moveit_demo.log 2>&1 &
+echo \$! > /root/start_logs/moveit_demo.pid
 " >/dev/null
 
 

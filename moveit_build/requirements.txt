@@ -25,10 +25,7 @@ matplotlib>=3.5
 # Configuration
 # -----------------------------
 
-# -----------------------------
-# Machine Learning (PVN3D)
-# -----------------------------
-torch>=1.12
+
 
 # -----------------------------
 # Optional: Computer Vision

@@ -16,7 +16,8 @@ To start:
     It also runs diagnostic tests of the pose, intercept, and trajectory planners. 
 2. Run ./stop.sh to stop the services and tear down the stack
 
-
+# Training DGM
+1. rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=3000 _batch:=192
 
     
 

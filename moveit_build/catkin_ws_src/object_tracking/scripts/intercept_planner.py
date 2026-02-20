@@ -137,6 +137,35 @@ class InterceptPlanner:
             rate.sleep()
 
     # ------------------------------
+    def call_planner_with_timeout(self, goal, timeout_s):
+
+        result = {"resp": None}
+
+        def worker():
+            try:
+                mpr = MotionPlanRequest()
+                mpr.group_name = self.group_name
+                mpr.allowed_planning_time = self.allowed_planning_time
+                mpr.start_state = self.start_state
+                mpr.goal_constraints = [
+                    make_goal_constraints(goal, self.ee_link, self.pos_tol, self.ang_tol)
+                ]
+
+                req = GetMotionPlanRequest()
+                req.motion_plan_request = mpr
+                result["resp"] = self.plan(req).motion_plan_response
+            except Exception as e:
+                rospy.logerr("Planner exception: %s", str(e))
+
+        th = threading.Thread(target=worker)
+        th.start()
+        th.join(timeout_s)
+
+        if th.is_alive():
+            rospy.logwarn("Planner timeout.")
+            return None
+
+        return result["resp"]
 
     def process_once(self):
 
@@ -150,7 +179,9 @@ class InterceptPlanner:
 
         t_hit, goal = choice
 
-        rospy.loginfo("Intercept @ %.2fs", t_hit)
+        # rospy.loginfo("Intercept @ %.2fs", t_hit)
+        rospy.loginfo("Intercept @ %.2fs with goal position %s and orientation %s",
+                      t_hit, goal.pose.position, goal.pose.orientation)
 
         self.busy = True
         try:
@@ -208,7 +239,7 @@ class InterceptPlanner:
             dy = goal.pose.position.y - ee0[1]
             dz = goal.pose.position.z - ee0[2]
 
-            dist = math.sqrt(dx*dx + dy*dy + dz*dz)
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
 
             if dist <= self.v_ee_max * t:
                 if self.ik_feasible(goal):
@@ -246,35 +277,35 @@ class InterceptPlanner:
 
     # ------------------------------
 
-    def call_planner_with_timeout(self, goal, timeout_s):
-
-        result = {"resp": None}
-
-        def worker():
-            try:
-                mpr = MotionPlanRequest()
-                mpr.group_name = self.group_name
-                mpr.allowed_planning_time = self.allowed_planning_time
-                mpr.start_state = self.start_state
-                mpr.goal_constraints = [
-                    make_goal_constraints(goal, self.ee_link, self.pos_tol, self.ang_tol)
-                ]
-
-                req = GetMotionPlanRequest()
-                req.motion_plan_request = mpr
-                result["resp"] = self.plan(req).motion_plan_response
-            except Exception as e:
-                rospy.logerr("Planner exception: %s", str(e))
-
-        th = threading.Thread(target=worker)
-        th.start()
-        th.join(timeout_s)
-
-        if th.is_alive():
-            rospy.logwarn("Planner timeout.")
-            return None
-
-        return result["resp"]
+    # def call_planner_with_timeout(self, goal, timeout_s):
+    #
+    #     result = {"resp": None}
+    #
+    #     def worker():
+    #         try:
+    #             mpr = MotionPlanRequest()
+    #             mpr.group_name = self.group_name
+    #             mpr.allowed_planning_time = self.allowed_planning_time
+    #             mpr.start_state = self.start_state
+    #             mpr.goal_constraints = [
+    #                 make_goal_constraints(goal, self.ee_link, self.pos_tol, self.ang_tol)
+    #             ]
+    #
+    #             req = GetMotionPlanRequest()
+    #             req.motion_plan_request = mpr
+    #             result["resp"] = self.plan(req).motion_plan_response
+    #         except Exception as e:
+    #             rospy.logerr("Planner exception: %s", str(e))
+    #
+    #     th = threading.Thread(target=worker)
+    #     th.start()
+    #     th.join(timeout_s)
+    #
+    #     if th.is_alive():
+    #         rospy.logwarn("Planner timeout.")
+    #         return None
+    #
+    #     return result["resp"]
 
 
 # ------------------------------
