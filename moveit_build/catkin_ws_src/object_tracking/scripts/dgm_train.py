@@ -7,10 +7,11 @@ import torch
 import torch.optim as optim
 
 import rospy
+from geometry_msgs.msg import Point
 from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest
 from moveit_commander import RobotCommander, MoveGroupCommander
 
-from moveit_build.catkin_ws_src.object_tracking.src.object_tracking.dgm_model import DGMValueNet, build_input
+from .dgm_model import DGMValueNet, build_input
 
 
 def panda_joint_limits() -> Tuple[np.ndarray, np.ndarray]:

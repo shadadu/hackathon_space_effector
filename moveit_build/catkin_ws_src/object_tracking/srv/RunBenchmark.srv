@@ -1,0 +1,14 @@
+# Request
+int32 num_trials
+string planner_a               # e.g. "/plan_kinematic_path"
+string planner_b               # e.g. "/dgm/get_motion_plan" (can be empty to disable alternating)
+bool alternate                 # if true, A,B,A,B...
+int32 max_attempts             # override if >0 else use node param
+float32 eval_window_s
+float32 eps_pos
+float32 eps_ang
+
+---
+# Response
+bool accepted
+string message

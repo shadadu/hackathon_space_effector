@@ -11,6 +11,8 @@ find_package(catkin REQUIRED COMPONENTS
   moveit_ros_planning
 )
 
+##catkin_python_setup()
+
 find_package(Eigen3 REQUIRED)
 
 add_service_files(
