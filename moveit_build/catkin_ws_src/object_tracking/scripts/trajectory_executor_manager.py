@@ -23,6 +23,8 @@ from shape_msgs.msg import SolidPrimitive
 from sensor_msgs.msg import JointState
 
 
+
+
 def make_robot_state_from_joint_dict(joint_dict):
     js = JointState()
     js.name = list(joint_dict.keys())
@@ -30,6 +32,7 @@ def make_robot_state_from_joint_dict(joint_dict):
     rs = RobotState()
     rs.joint_state = js
     return rs
+
 
 def panda_extended_open_start_state():
     joints = {
@@ -45,8 +48,9 @@ def panda_extended_open_start_state():
     }
     return make_robot_state_from_joint_dict(joints)
 
+
 def make_goal_constraints_from_pose(goal_pose_stamped: PoseStamped, ee_link: str,
-                                   pos_tol=0.02, ang_tol=0.35):
+                                    pos_tol=0.02, ang_tol=0.35):
     c = Constraints()
 
     pc = PositionConstraint()
@@ -186,8 +190,8 @@ class TrajectoryExecutorManager:
         mpr.max_acceleration_scaling_factor = self.acc_scale
         mpr.start_state = self.start_state
         mpr.goal_constraints = [make_goal_constraints_from_pose(goal, self.ee_link,
-                                                               pos_tol=eps_pos,
-                                                               ang_tol=eps_ang)]
+                                                                pos_tol=eps_pos,
+                                                                ang_tol=eps_ang)]
         return mpr
 
     def call_planner(self, service_name: str, mpr: MotionPlanRequest):
@@ -247,8 +251,9 @@ class TrajectoryExecutorManager:
         md = self.active["min_dist"]
         ma = self.active["min_ang"]
         pt = self.active["planner_time_s"]
-        rospy.loginfo("END trial=%s success=%s reason=%s planner=%s attempt=%d min_dist=%.4f min_ang=%.4f plan_time=%.4f",
-                      tid, str(success), reason, planner, k, md, ma, (pt if pt is not None else -1.0))
+        rospy.loginfo(
+            "END trial=%s success=%s reason=%s planner=%s attempt=%d min_dist=%.4f min_ang=%.4f plan_time=%.4f",
+            tid, str(success), reason, planner, k, md, ma, (pt if pt is not None else -1.0))
         self.publish_status(f"TRIAL_END {tid} success={success} reason={reason} min_dist={md:.4f}")
         self.active = None
 
@@ -394,7 +399,7 @@ class TrajectoryExecutorManager:
             if alternate and planner_b:
                 planner = planner_a if (i % 2 == 0) else planner_b
 
-            tid = f"bench_{i:03d}_{'A' if planner==planner_a else 'B'}_{uuid.uuid4().hex[:6]}"
+            tid = f"bench_{i:03d}_{'A' if planner == planner_a else 'B'}_{uuid.uuid4().hex[:6]}"
 
             # Wait until manager is free
             while not rospy.is_shutdown():
@@ -416,7 +421,7 @@ class TrajectoryExecutorManager:
 
             # No direct return object; parse via logs for now.
             results.append((tid, planner))
-            rospy.loginfo("BENCHMARK progress: %d/%d done", i+1, n)
+            rospy.loginfo("BENCHMARK progress: %d/%d done", i + 1, n)
 
         rospy.loginfo("BENCHMARK worker finished. trials_completed=%d", len(results))
 
@@ -431,11 +436,17 @@ class TrajectoryExecutorManager:
             self.cancel_execution()
             self._finish_trial(False, "exception")
 
+    def decode(code):
+        for k, v in MoveItErrorCodes.__dict__.items():
+            if isinstance(v, int) and v == code:
+                return k
+        return str(code)
 
 def main():
     rospy.init_node("trajectory_executor_manager")
     TrajectoryExecutorManager()
     rospy.spin()
+
 
 if __name__ == "__main__":
     main()

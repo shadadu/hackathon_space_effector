@@ -115,6 +115,7 @@ class InterceptPlanner:
 
         self.pub_goal = rospy.Publisher("/intercept/goal_pose", PoseStamped, queue_size=1)
         self.pub_pred = rospy.Publisher("/intercept/object_pred", PoseStamped, queue_size=1)
+        rospy.loginfo("Goal pose and Object pred %s --> %s", self.pub_goal, self.pub_pred)
 
         # Start robust control loop thread
         self.thread = threading.Thread(target=self.loop, daemon=True)
@@ -258,7 +259,7 @@ class InterceptPlanner:
                 rospy.Time(0), rospy.Duration(0.2)
             )
             t = tf.transform.translation
-            return (t.x, t.y, t.z)
+            return t.x, t.y, t.z
         except:
             return None
 

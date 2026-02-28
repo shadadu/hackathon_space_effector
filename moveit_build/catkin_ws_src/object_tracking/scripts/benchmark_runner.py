@@ -15,7 +15,6 @@ from moveit_msgs.srv import GetPlanningScene, GetPlanningSceneRequest
 from moveit_msgs.msg import PlanningSceneComponents
 from sensor_msgs.msg import JointState
 
-
 # Use a deterministic, collision-free-ish state as fallback
 PANDA_EXTENDED = {
     "panda_joint1": 0.0,
@@ -43,9 +42,9 @@ def make_panda_start_state() -> RobotState:
 
 
 def make_goal_constraints_from_pose(goal_pose: PoseStamped,
-                                   link_name: str,
-                                   pos_tol: float = 0.01,
-                                   ang_tol: float = 0.05) -> Constraints:
+                                    link_name: str,
+                                    pos_tol: float = 0.01,
+                                    ang_tol: float = 0.05) -> Constraints:
     c = Constraints()
     c.name = "goal_pose_constraints"
 
@@ -84,11 +83,11 @@ def get_planning_scene(service_name: str = "/get_planning_scene", timeout: float
 
     req = GetPlanningSceneRequest()
     req.components.components = (
-        PlanningSceneComponents.SCENE_SETTINGS |
-        PlanningSceneComponents.ROBOT_STATE |
-        PlanningSceneComponents.WORLD_OBJECT_NAMES |
-        PlanningSceneComponents.WORLD_OBJECT_GEOMETRY |
-        PlanningSceneComponents.ALLOWED_COLLISION_MATRIX
+            PlanningSceneComponents.SCENE_SETTINGS |
+            PlanningSceneComponents.ROBOT_STATE |
+            PlanningSceneComponents.WORLD_OBJECT_NAMES |
+            PlanningSceneComponents.WORLD_OBJECT_GEOMETRY |
+            PlanningSceneComponents.ALLOWED_COLLISION_MATRIX
     )
     return srv(req).scene
 
@@ -295,7 +294,8 @@ def main():
         rospy.loginfo("OMPL error_code=%s planning_time=%.3f wall_time=%.3f",
                       str(ompl["error_code"]), float(ompl["planning_time"]), float(ompl["wall_time"]))
 
-    ompl_m = traj_metrics(mpr, ompl["trajectory"]) if ompl["trajectory"] else {"points": 0, "duration_s": 0.0, "joint_path_len": 0.0}
+    ompl_m = traj_metrics(mpr, ompl["trajectory"]) if ompl["trajectory"] else {"points": 0, "duration_s": 0.0,
+                                                                               "joint_path_len": 0.0}
     if ompl["success"]:
         rospy.loginfo("OMPL traj points=%d duration=%.3f joint_path_len=%.3f",
                       ompl_m["points"], ompl_m["duration_s"], ompl_m["joint_path_len"])
@@ -328,7 +328,8 @@ def main():
         rospy.loginfo("DGM error_code=%s planning_time=%.3f wall_time=%.3f",
                       str(dgm["error_code"]), float(dgm["planning_time"]), float(dgm["wall_time"]))
 
-    dgm_m = traj_metrics(mpr, dgm["trajectory"]) if dgm["trajectory"] else {"points": 0, "duration_s": 0.0, "joint_path_len": 0.0}
+    dgm_m = traj_metrics(mpr, dgm["trajectory"]) if dgm["trajectory"] else {"points": 0, "duration_s": 0.0,
+                                                                            "joint_path_len": 0.0}
     if dgm["success"]:
         rospy.loginfo("DGM traj points=%d duration=%.3f joint_path_len=%.3f",
                       dgm_m["points"], dgm_m["duration_s"], dgm_m["joint_path_len"])

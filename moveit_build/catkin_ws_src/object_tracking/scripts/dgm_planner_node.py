@@ -15,8 +15,14 @@ from jacobian_server.srv import GetJacobian, GetJacobianRequest
 # from catkin_ws_src.object_tracking.scripts.dgm_model import load_model, DGMValueNet
 
 from object_tracking.dgm_model import DGMValueNet
+# from object_tracking.trajectory_executor_manager import TrajectoryExecutorManager
 
 
+def decode(code):
+    for k, v in MoveItErrorCodes.__dict__.items():
+        if isinstance(v, int) and v == code:
+            return k
+    return str(code)
 # from dgm_model import load_model, DGMValueNet
 # from dgm_rollout import RolloutConfig, rollout_dgm_joint_policy
 

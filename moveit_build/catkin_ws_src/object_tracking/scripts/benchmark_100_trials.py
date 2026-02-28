@@ -11,7 +11,7 @@ from std_msgs.msg import Header
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState
 from moveit_msgs.msg import RobotState, Constraints, PositionConstraint
-from moveit_msgs.msg import MotionPlanRequest
+from moveit_msgs.msg import MotionPlanRequest, MoveItErrorCodes
 from moveit_msgs.srv import GetMotionPlan, GetMotionPlanRequest
 from moveit_msgs.srv import GetPlanningScene, GetPlanningSceneRequest
 from moveit_msgs.msg import PlanningSceneComponents
@@ -19,10 +19,15 @@ from shape_msgs.msg import SolidPrimitive
 
 # NEW msg (import test message)
 from object_tracking.msg import BenchmarkSummary
+# from object_tracking.trajectory_executor_manager import TrajectoryExecutorManager
 
 
 # ----------------- utilities -----------------
-
+def decode(code):
+    for k, v in MoveItErrorCodes.__dict__.items():
+        if isinstance(v, int) and v == code:
+            return k
+    return str(code)
 def make_robot_state_from_joint_dict(joint_dict: Dict[str, float]) -> RobotState:
     js = JointState()
     js.name = list(joint_dict.keys())
@@ -57,10 +62,12 @@ def get_planning_scene(service_name: str = "/get_planning_scene"):
     )
     return srv(req).scene
 
-
 def start_state_from_scene_or_default(scene) -> RobotState:
     if scene and scene.robot_state and scene.robot_state.joint_state.name:
         rs = scene.robot_state
+        rospy.loginfo("Scene initial robot state %s: %s", rs.joint_state.name, rs.joint_state.position )
+        rs = panda_extended_open_start_state()
+        rospy.loginfo("Panda extended open start robot state: %s %s", rs.joint_state.name, rs.joint_state.position)
         names = list(rs.joint_state.name)
         pos = list(rs.joint_state.position)
 
@@ -70,9 +77,11 @@ def start_state_from_scene_or_default(scene) -> RobotState:
 
         rs.joint_state.name = names
         rs.joint_state.position = pos
+        rospy.loginfo("Scene: updated robot start state positions %s with finger joints", rs.joint_state.position)
         return rs
-
-    return panda_extended_open_start_state()
+    panda_eos = panda_extended_open_start_state()
+    rospy.loginfo("Scene: setting start state position to extended open start default %s", panda_eos)
+    return panda_eos
 
 
 def sample_goal(bounds: Dict[str, float]) -> Tuple[float, float, float]:
@@ -122,6 +131,7 @@ def call_plan(service_proxy: rospy.ServiceProxy, mpr: MotionPlanRequest) -> Tupl
     resp = service_proxy(req).motion_plan_response
     code = int(resp.error_code.val)
     ptime = float(resp.planning_time)
+
     npts = 0
     try:
         npts = len(resp.trajectory.joint_trajectory.points)
@@ -164,7 +174,7 @@ def main():
 
     # Services
     ompl_service = rospy.get_param("~ompl_service", "/plan_kinematic_path")
-    dgm_service  = rospy.get_param("~dgm_service",  "/dgm/get_motion_plan")
+    dgm_service = rospy.get_param("~dgm_service",  "/dgm/get_motion_plan")
 
     rospy.loginfo("Waiting for services: OMPL=%s DGM=%s", ompl_service, dgm_service)
     rospy.wait_for_service(ompl_service, timeout=60.0)
@@ -183,7 +193,7 @@ def main():
         raise
 
     ompl = rospy.ServiceProxy(ompl_service, GetMotionPlan, persistent=True)
-    dgm  = rospy.ServiceProxy(dgm_service,  GetMotionPlan, persistent=True)
+    dgm = rospy.ServiceProxy(dgm_service,  GetMotionPlan, persistent=True)
 
     group_name = rospy.get_param("~group_name", "panda_arm")
     ee_link = rospy.get_param("~ee_link", "panda_hand")
@@ -215,7 +225,8 @@ def main():
 
     # Start state
     scene = get_planning_scene("/get_planning_scene")
-    start_state = start_state_from_scene_or_default(scene)
+    # start_state = start_state_from_scene_or_default(scene) # start state:RobotState
+    start_state = panda_extended_open_start_state()
 
     rows = []
     ompl_times_ok: List[float] = []
@@ -230,9 +241,18 @@ def main():
     rospy.loginfo("Planning params: allowed_time=%.2f attempts=%d vel=%.2f acc=%.2f",
                   allowed_planning_time, num_planning_attempts, vel_scale, acc_scale)
 
+    gx, gy, gz = sample_goal(bounds)
+    goal = make_goal_pose(world_frame, gx, gy, gz)
+    rospy.loginfo("Scene Robot Joint names =%s, Start position = %s",
+                  scene.robot_state.joint_state.name,
+                  scene.robot_state.joint_state.position)
+    rospy.loginfo("Start state Robot State names =%s, Start position = %s",
+                  start_state.joint_state.name,
+                  start_state.joint_state.position)
+
     for k in range(trials):
-        gx, gy, gz = sample_goal(bounds)
-        goal = make_goal_pose(world_frame, gx, gy, gz)
+        # gx, gy, gz = sample_goal(bounds)
+        # goal = make_goal_pose(world_frame, gx, gy, gz)
 
         mpr = MotionPlanRequest()
         mpr.group_name = group_name
@@ -251,7 +271,7 @@ def main():
             ompl_code, ompl_ptime, ompl_npts = (-999, 0.0, 0)
         ompl_wall = time.time() - t0
 
-        # DGM call (FIXED)
+        # DGM call
         t0 = time.time()
         try:
             dgm_code, dgm_ptime, dgm_npts = call_plan(dgm, mpr)
@@ -272,12 +292,16 @@ def main():
             dgm_times_ok.append(dgm_ptime)
             dgm_pts_ok.append(dgm_npts)
 
-        rows.append({
+        row_data = {
             "trial": k,
             "goal_x": gx, "goal_y": gy, "goal_z": gz,
-            "ompl_code": ompl_code, "ompl_planning_time": ompl_ptime, "ompl_wall_time": ompl_wall, "ompl_points": ompl_npts,
-            "dgm_code": dgm_code, "dgm_planning_time": dgm_ptime, "dgm_wall_time": dgm_wall, "dgm_points": dgm_npts,
-        })
+            "ompl_code": ompl_code, "ompl_code_msg": decode(ompl_code), "ompl_planning_time": ompl_ptime, "ompl_wall_time": ompl_wall, "ompl_points": ompl_npts,
+            "dgm_code": dgm_code, "dgm_code_msg": decode(dgm_code), "dgm_planning_time": dgm_ptime, "dgm_wall_time": dgm_wall, "dgm_points": dgm_npts,
+        }
+
+        rows.append(row_data)
+
+        rospy.loginfo("Row data @ trial %s %s", k, str(row_data)+"\n")
 
         if (k + 1) % 10 == 0:
             rospy.loginfo("Progress %d/%d | OMPL succ=%d DGM succ=%d",
