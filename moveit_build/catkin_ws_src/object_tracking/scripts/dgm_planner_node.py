@@ -15,7 +15,11 @@ from jacobian_server.srv import GetJacobian, GetJacobianRequest
 # from catkin_ws_src.object_tracking.scripts.dgm_model import load_model, DGMValueNet
 
 from object_tracking.dgm_model import DGMValueNet
-# from object_tracking.trajectory_executor_manager import TrajectoryExecutorManager
+from object_tracking.trajectory_executor_manager import TrajectoryExecutorManager
+from dgm_rollout import RolloutConfig, rollout_dgm_joint_policy
+
+from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 
 def decode(code):
@@ -23,22 +27,6 @@ def decode(code):
         if isinstance(v, int) and v == code:
             return k
     return str(code)
-# from dgm_model import load_model, DGMValueNet
-# from dgm_rollout import RolloutConfig, rollout_dgm_joint_policy
-
-# try:
-#     from object_tracking.dgm_model import load_model, DGMValueNet
-#     from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy
-# except ImportError:
-#     # fallback if running directly from source without proper PYTHONPATH
-#     import os, sys
-#     this_dir = os.path.dirname(os.path.abspath(__file__))
-#     pkg_src = os.path.abspath(os.path.join(this_dir, "..", "src"))
-#     if pkg_src not in sys.path:
-#         sys.path.insert(0, pkg_src)
-#     from object_tracking.dgm_model import load_model, DGMValueNet
-#     from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy
-
 
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
@@ -50,6 +38,100 @@ def default_vel_limits():
     # Conservative joint velocity limits (rad/s) for stable rollout
     return np.array([1.5, 1.5, 1.5, 1.8, 1.8, 2.0, 2.0], dtype=np.float64)
 
+
+def finite(x: np.ndarray) -> bool:
+    return np.all(np.isfinite(x))
+
+def compute_derivatives(q_hist: np.ndarray, dt: float):
+    # q_hist: (N,7)
+    qdot = np.diff(q_hist, axis=0) / dt              # (N-1,7)
+    qdd  = np.diff(qdot, axis=0) / dt                # (N-2,7)
+    qjerk = np.diff(qdd, axis=0) / dt                # (N-3,7)
+    return qdot, qdd, qjerk
+
+def enforce_time_monotone(traj: RobotTrajectory, dt: float):
+    # rewrite time_from_start to be monotone and consistent with dt
+    for k, pt in enumerate(traj.joint_trajectory.points):
+        pt.time_from_start = rospy.Duration.from_sec(k * dt)
+
+def ensure_joint_dims(traj: RobotTrajectory, n_joints: int):
+    jn = traj.joint_trajectory.joint_names
+    for k, pt in enumerate(traj.joint_trajectory.points):
+        if len(pt.positions) != n_joints:
+            raise RuntimeError(f"Waypoint {k}: positions len={len(pt.positions)} != {n_joints}")
+        # velocities are optional in MoveIt trajectories, but if present must match
+        if pt.velocities and len(pt.velocities) != n_joints:
+            raise RuntimeError(f"Waypoint {k}: velocities len={len(pt.velocities)} != {n_joints}")
+
+def robot_state_from_q(active_joints, q: np.ndarray) -> RobotState:
+    rs = RobotState()
+    js = JointState()
+    js.name = list(active_joints)
+    js.position = [float(x) for x in q.tolist()]
+    rs.joint_state = js
+    return rs
+
+def check_limits(q_hist, jmin, jmax, vel_limits, dt,
+                 acc_limits=None, jerk_limits=None):
+    """
+    Returns (ok:bool, reason:str, metrics:dict)
+    """
+    if not finite(q_hist):
+        return False, "non_finite_q", {}
+
+    # position
+    if np.any(q_hist < (jmin[None, :] - 1e-9)) or np.any(q_hist > (jmax[None, :] + 1e-9)):
+        return False, "position_limit_violation", {}
+
+    qdot, qdd, qjerk = compute_derivatives(q_hist, dt)
+
+    if not finite(qdot):
+        return False, "non_finite_qdot", {}
+
+    # velocity (∞-norm per joint)
+    vmax = np.max(np.abs(qdot), axis=0)
+    if np.any(vmax > (vel_limits + 1e-6)):
+        return False, f"velocity_limit_violation vmax={vmax}", {"vmax": vmax}
+
+    # if you don't have explicit acc/jerk limits yet, we still compute them for logging/penalty
+    amax = np.max(np.abs(qdd), axis=0) if qdd.shape[0] else np.zeros(7)
+    jmaxv = np.max(np.abs(qjerk), axis=0) if qjerk.shape[0] else np.zeros(7)
+
+    if acc_limits is not None and qdd.shape[0]:
+        if np.any(amax > (acc_limits + 1e-6)):
+            return False, f"acc_limit_violation amax={amax}", {"amax": amax}
+
+    if jerk_limits is not None and qjerk.shape[0]:
+        if np.any(jmaxv > (jerk_limits + 1e-6)):
+            return False, f"jerk_limit_violation jmax={jmaxv}", {"jmax": jmaxv}
+
+    return True, "ok", {"vmax": vmax, "amax": amax, "jmax": jmaxv}
+
+def validate_with_moveit_state_validity(
+    svc: rospy.ServiceProxy,
+    active_joints,
+    q_hist: np.ndarray,
+    group_name: str,
+    stride: int = 5
+):
+    """
+    Subsample trajectory states and call /check_state_validity.
+    Returns (ok, first_bad_index, message)
+    """
+    req = GetStateValidityRequest()
+    req.group_name = group_name
+
+    N = q_hist.shape[0]
+    for k in range(0, N, max(1, stride)):
+        req.robot_state = robot_state_from_q(active_joints, q_hist[k])
+        try:
+            resp = svc(req)
+        except Exception as e:
+            return False, k, f"state_validity_call_failed: {e}"
+        # resp.valid is bool in MoveIt
+        if not resp.valid:
+            return False, k, "collision_or_constraints_invalid"
+    return True, -1, "ok"
 
 class DGMPlannerService:
     def __init__(self):
