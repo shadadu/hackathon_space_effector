@@ -1,14 +1,37 @@
 # Request
 int32 num_trials
-string planner_a               # e.g. "/plan_kinematic_path"
-string planner_b               # e.g. "/dgm/get_motion_plan" (can be empty to disable alternating)
-bool alternate                 # if true, A,B,A,B...
-int32 max_attempts             # override if >0 else use node param
+int32 seed                    # -1 => node chooses (time-based)
+string run_id                 # "" => node auto-generates
+
+# Planners (MotionPlan service names)
+string planner_a              # e.g. "/plan_kinematic_path"
+string planner_b              # e.g. "/dgm/get_motion_plan" ("" disables)
+bool alternate                # if true: A,B,A,B...
+
+# Execution/retry policy
+int32 max_attempts            # <=0 => use node param default
 float32 eval_window_s
 float32 eps_pos
 float32 eps_ang
+
+# Goal sampling (position-only first)
+bool use_random_goals
+float32 x_min
+float32 x_max
+float32 y_min
+float32 y_max
+float32 z_min
+float32 z_max
+float32 pos_tol
+
+# Data logging
+string out_csv_path           # "" => node default path
+bool snapshot_jacobian        # store /get_jacobian samples during rollout
+int32 jacobian_stride         # sample every k points (>=1)
 
 ---
 # Response
 bool accepted
 string message
+string run_id
+string out_csv_path

@@ -40,14 +40,17 @@ generate_messages(
 catkin_package(
   CATKIN_DEPENDS
    message_runtime
+    rospy
     std_msgs
     geometry_msgs
+    moveit_ros_planning_interface
     nav_msgs
     sensor_msgs
     moveit_msgs
     shape_msgs
     tf2_ros
     tf2_geometry_msgs
+    message_runtime
 )
 
 
@@ -60,6 +63,7 @@ catkin_install_python(
     scripts/intercept_planner.py
     scripts/intercept_evaluator.py
     scripts/trajectory_executor_manager.py
+    scripts/dgm_planner_node.py
     scripts/dgm_train.py
     scripts/dgm_pretrain.py
     scripts/dgm_dataset_gen.py

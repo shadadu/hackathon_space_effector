@@ -12,12 +12,15 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 # from .dgm_model import build_input, DGMValueNet
 
-from object_tracking.scripts.dgm_model import load_model, DGMValueNet, build_input
+# from object_tracking.scripts.dgm_model import load_model, DGMValueNet, build_input
 from object_tracking.dgm_model import DGMValueNet
+
 
 
 @dataclass
 class RolloutConfig:
+    def __init__(self):
+        super().__init__()
     T: float = 2.0
     dt: float = 0.02
     vel_limits: np.ndarray = None  # (7,)

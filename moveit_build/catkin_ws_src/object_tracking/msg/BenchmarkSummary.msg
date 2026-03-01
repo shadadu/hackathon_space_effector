@@ -1,34 +1,64 @@
-# High-level summary of a benchmark run (e.g., 100 trials)
-
-std_msgs/Header header
-
+# High-level benchmark summary (one run)
 string run_id
-string planner_a   # e.g. "OMPL"
-string planner_b   # e.g. "DGM"
+int32 trials
+int32 seed
 
-uint32 n_trials
+# Services used
+string ompl_service
+string dgm_service
+string validity_service
+string jacobian_service
 
-# Success counts
-uint32 success_a
-uint32 success_b
+# Workspace bounds and tolerances
+float64 x_min
+float64 x_max
+float64 y_min
+float64 y_max
+float64 z_min
+float64 z_max
+float64 pos_tol
 
-# Intercept success counts (if you separate planning success vs intercept success)
-uint32 intercept_success_a
-uint32 intercept_success_b
+# Planning configuration
+float64 allowed_planning_time
+int32 num_planning_attempts
+float64 vel_scale
+float64 acc_scale
+int32 validity_check_stride
+bool snapshot_jacobian
 
-# Aggregate timing (seconds)
-float64 mean_plan_time_a
-float64 std_plan_time_a
-float64 mean_plan_time_b
-float64 std_plan_time_b
+# Success rates
+int32 ompl_success
+int32 dgm_success
+float64 ompl_success_rate
+float64 dgm_success_rate
 
-# Aggregate trajectory metrics
-float64 mean_path_length_a
-float64 mean_path_length_b
+# "All-valid" rates (passes /check_state_validity on sampled waypoints + time monotone + no joint limit violation)
+int32 ompl_all_valid
+int32 dgm_all_valid
+float64 ompl_all_valid_rate
+float64 dgm_all_valid_rate
 
-# Aggregate intercept metrics
-float64 mean_time_to_intercept_a
-float64 mean_time_to_intercept_b
+# Timing stats (planning_time reported by MoveIt)
+float64 ompl_plan_mean
+float64 ompl_plan_median
+float64 ompl_plan_p90
+float64 dgm_plan_mean
+float64 dgm_plan_median
+float64 dgm_plan_p90
 
-# Notes / diagnostics
-string notes
+# Validity stats (fraction of sampled waypoints valid)
+float64 ompl_valid_frac_mean
+float64 ompl_valid_frac_median
+float64 ompl_valid_frac_p90
+float64 dgm_valid_frac_mean
+float64 dgm_valid_frac_median
+float64 dgm_valid_frac_p90
+
+# Smoothness penalties (finite-diff)
+float64 ompl_acc_pen_mean
+float64 ompl_jerk_pen_mean
+float64 dgm_acc_pen_mean
+float64 dgm_jerk_pen_mean
+
+# Output files
+string csv_path

@@ -8,6 +8,8 @@ from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
 from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
 from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest
 from moveit_commander import RobotCommander, MoveGroupCommander
+from moveit_msgs.msg import RobotTrajectory, RobotState
+from sensor_msgs.msg import JointState
 
 # Optional Jacobian service hook
 from jacobian_server.srv import GetJacobian, GetJacobianRequest
@@ -15,8 +17,7 @@ from jacobian_server.srv import GetJacobian, GetJacobianRequest
 # from catkin_ws_src.object_tracking.scripts.dgm_model import load_model, DGMValueNet
 
 from object_tracking.dgm_model import DGMValueNet
-from object_tracking.trajectory_executor_manager import TrajectoryExecutorManager
-from dgm_rollout import RolloutConfig, rollout_dgm_joint_policy
+from object_tracking.dgm_rollout import DGMRollout # RolloutConfig, rollout_dgm_joint_policy
 
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 from trajectory_msgs.msg import JointTrajectoryPoint
@@ -240,54 +241,135 @@ class DGMPlannerService:
         resp.error_code.val = MoveItErrorCodes.SUCCESS
         resp.planning_time = 0.0
 
-        if self.model is None:
-            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
-            return GetMotionPlanResponse(motion_plan_response=resp)
-
+        # ---- basic request checks ----
         if not mpr.goal_constraints:
             resp.error_code.val = MoveItErrorCodes.INVALID_GOAL_CONSTRAINTS
             return GetMotionPlanResponse(motion_plan_response=resp)
 
-        # Optional early IK feasibility check (can disable if you want pure DGM)
+        if self.model is None:
+            rospy.logerr("DGM model is not loaded; returning INVALID_MOTION_PLAN")
+            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+            return GetMotionPlanResponse(motion_plan_response=resp)
+
+        # ---- group joints ----
+        group = MoveGroupCommander(mpr.group_name or self.group_name)
+        active_joints = group.get_active_joints()
+        if len(active_joints) != 7:
+            rospy.logerr("Expected 7 active joints, got %d (%s)", len(active_joints), active_joints)
+            resp.error_code.val = MoveItErrorCodes.INVALID_GROUP_NAME
+            return GetMotionPlanResponse(motion_plan_response=resp)
+
+        # ---- goal + start ----
+        goal_pos = self.extract_goal_position(mpr)
+        q0 = self.start_state_q0(mpr, active_joints)
+        q0 = np.minimum(np.maximum(q0, self.jmin), self.jmax)
+
+        # optional: early IK feasibility (helps reject impossible goals quickly)
         if not bool(rospy.get_param("~skip_ik_check", False)):
             if not self.ik_feasible_pose(mpr):
                 resp.error_code.val = MoveItErrorCodes.NO_IK_SOLUTION
                 return GetMotionPlanResponse(motion_plan_response=resp)
 
-        group = MoveGroupCommander(mpr.group_name or self.group_name)
-        active_joints = group.get_active_joints()
-        if len(active_joints) != 7:
-            resp.error_code.val = MoveItErrorCodes.INVALID_GROUP_NAME
-            return GetMotionPlanResponse(motion_plan_response=resp)
-
-        goal_pos = self.extract_goal_position(mpr)
-        q0 = self.start_state_q0(mpr, active_joints)
-
-        # Rollout
-        cfg = RolloutConfig(
+        # ---- rollout ----
+        cfg = DGMRollout.RolloutConfig(
             T=self.T,
             dt=self.dt,
             vel_limits=self.vel_limits,
             joint_min=self.jmin,
             joint_max=self.jmax,
             R_diag=self.R_diag,
+            max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
         )
 
         t0 = time.time()
-        traj, q_hist = rollout_dgm_joint_policy(
-            model=self.model,
-            q0=q0,
-            goal_pos=goal_pos,
-            active_joints=active_joints,
-            cfg=cfg,
-            device=self.device,
-        )
+        try:
+            traj, q_hist = DGMRollout.rollout_dgm_joint_policy(
+                model=self.model,
+                q0=q0,
+                goal_pos=goal_pos,
+                active_joints=active_joints,
+                cfg=cfg,
+                device=self.device,
+            )
+        except Exception as e:
+            rospy.logerr("DGM rollout failed: %s", str(e))
+            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+            return GetMotionPlanResponse(motion_plan_response=resp)
+
         resp.planning_time = float(time.time() - t0)
 
-        # Jacobian hook (one call at start/end for now)
+        # ---- I.5 enforce time monotonicity ----
+        try:
+            enforce_time_monotone(traj, self.dt)
+            ensure_joint_dims(traj, n_joints=len(active_joints))
+        except Exception as e:
+            rospy.logerr("Trajectory formatting invalid: %s", str(e))
+            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+            return GetMotionPlanResponse(motion_plan_response=resp)
+
+        # ---- I.4 start consistency ----
+        # Ensure first point matches q0 (small numerical tolerance)
+        if np.max(np.abs(np.array(traj.joint_trajectory.points[0].positions) - q0)) > 1e-6:
+            rospy.logwarn("First waypoint != start_state; forcing first waypoint to q0")
+            traj.joint_trajectory.points[0].positions = [float(x) for x in q0.tolist()]
+            # Also adjust q_hist[0] to match for downstream checks
+            q_hist[0, :] = q0
+
+        # ---- I.1 limits + continuity/jerk metrics ----
+        ok_limits, reason, met = check_limits(
+            q_hist=q_hist,
+            jmin=self.jmin,
+            jmax=self.jmax,
+            vel_limits=self.vel_limits,
+            dt=self.dt,
+            acc_limits=None,  # you can add later
+            jerk_limits=None,  # you can add later
+        )
+        if not ok_limits:
+            rospy.logwarn("DGM plan rejected by limit checks: %s", reason)
+            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+            return GetMotionPlanResponse(motion_plan_response=resp)
+
+        # Log jerk / smoothness stats (useful for training penalties)
+        jerk = met.get("jmax", None)
+        if jerk is not None:
+            rospy.loginfo("DGM smoothness: vmax=%s amax=%s jmax=%s",
+                          np.array2string(met["vmax"], precision=2),
+                          np.array2string(met["amax"], precision=2),
+                          np.array2string(met["jmax"], precision=2))
+
+        # ---- I.2 collision/state validity ----
+        try:
+            rospy.wait_for_service("/check_state_validity", timeout=2.0)
+            state_validity = rospy.ServiceProxy("/check_state_validity", GetStateValidity)
+        except Exception:
+            # try common namespaced form
+            try:
+                rospy.wait_for_service("/move_group/check_state_validity", timeout=2.0)
+                state_validity = rospy.ServiceProxy("/move_group/check_state_validity", GetStateValidity)
+            except Exception as e:
+                rospy.logwarn("No state validity service reachable; skipping collision validation (%s)", str(e))
+                state_validity = None
+
+        if state_validity is not None:
+            stride = int(rospy.get_param("~validity_stride", 5))  # check every 5th point by default
+            ok_val, bad_k, msg = validate_with_moveit_state_validity(
+                svc=state_validity,
+                active_joints=active_joints,
+                q_hist=q_hist,
+                group_name=(mpr.group_name or self.group_name),
+                stride=stride,
+            )
+            if not ok_val:
+                rospy.logwarn("DGM plan rejected by MoveIt validity at k=%d: %s", bad_k, msg)
+                resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+                return GetMotionPlanResponse(motion_plan_response=resp)
+
+        # ---- optional Jacobian hook ----
         self.jacobian_hook_call(active_joints, q_hist[0])
         self.jacobian_hook_call(active_joints, q_hist[-1])
 
+        # ---- success ----
         resp.trajectory = traj
         resp.error_code.val = MoveItErrorCodes.SUCCESS
         return GetMotionPlanResponse(motion_plan_response=resp)

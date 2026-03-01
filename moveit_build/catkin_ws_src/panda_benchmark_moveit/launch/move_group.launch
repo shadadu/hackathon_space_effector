@@ -29,7 +29,7 @@
 
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/fake_controllers.yaml"/>
   <param name="moveit_controller_manager" value="moveit_fake_controller_manager/MoveItFakeControllerManager"/>
-
+   
   <!-- Make MoveIt services deterministic (FK/IK/Planning/Scene) -->
   <param name="move_group/capabilities"
          value="move_group/MoveGroupKinematicsService

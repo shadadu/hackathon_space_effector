@@ -2,25 +2,32 @@
 import os
 import csv
 import time
-import json
 import random
 import statistics
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Tuple
 
 import rospy
-from std_msgs.msg import String
+from std_msgs.msg import Header
 from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState
 from moveit_msgs.msg import RobotState, Constraints, PositionConstraint
-from moveit_msgs.msg import MotionPlanRequest
+from moveit_msgs.msg import MotionPlanRequest, MoveItErrorCodes
 from moveit_msgs.srv import GetMotionPlan, GetMotionPlanRequest
 from moveit_msgs.srv import GetPlanningScene, GetPlanningSceneRequest
 from moveit_msgs.msg import PlanningSceneComponents
 from shape_msgs.msg import SolidPrimitive
 
+# NEW msg (import test message)
+from object_tracking.msg import BenchmarkSummary
+# from object_tracking.trajectory_executor_manager import TrajectoryExecutorManager
+
 
 # ----------------- utilities -----------------
-
+def decode(code):
+    for k, v in MoveItErrorCodes.__dict__.items():
+        if isinstance(v, int) and v == code:
+            return k
+    return str(code)
 def make_robot_state_from_joint_dict(joint_dict: Dict[str, float]) -> RobotState:
     js = JointState()
     js.name = list(joint_dict.keys())
@@ -31,12 +38,11 @@ def make_robot_state_from_joint_dict(joint_dict: Dict[str, float]) -> RobotState
 
 
 def panda_extended_open_start_state() -> RobotState:
-    # A deterministic, collision-free-ish default for panda resources
     joints = {
         "panda_joint1": 0.0,
-        "panda_joint2": -0.785,
+        "panda_joint2": 0.0,
         "panda_joint3": 0.0,
-        "panda_joint4": -2.356,
+        "panda_joint4": 0.0,
         "panda_joint5": 0.0,
         "panda_joint6": 1.571,
         "panda_joint7": 0.785,
@@ -49,7 +55,6 @@ def panda_extended_open_start_state() -> RobotState:
 def get_planning_scene(service_name: str = "/get_planning_scene"):
     rospy.wait_for_service(service_name, timeout=20.0)
     srv = rospy.ServiceProxy(service_name, GetPlanningScene)
-
     req = GetPlanningSceneRequest()
     req.components.components = (
         PlanningSceneComponents.ROBOT_STATE |
@@ -57,14 +62,12 @@ def get_planning_scene(service_name: str = "/get_planning_scene"):
     )
     return srv(req).scene
 
-
 def start_state_from_scene_or_default(scene) -> RobotState:
-    """
-    Prefer the planning scene robot_state (more complete in headless setups),
-    but ensure gripper joints exist.
-    """
     if scene and scene.robot_state and scene.robot_state.joint_state.name:
         rs = scene.robot_state
+        rospy.loginfo("Scene initial robot state %s: %s", rs.joint_state.name, rs.joint_state.position )
+        rs = panda_extended_open_start_state()
+        rospy.loginfo("Panda extended open start robot state: %s %s", rs.joint_state.name, rs.joint_state.position)
         names = list(rs.joint_state.name)
         pos = list(rs.joint_state.position)
 
@@ -74,9 +77,11 @@ def start_state_from_scene_or_default(scene) -> RobotState:
 
         rs.joint_state.name = names
         rs.joint_state.position = pos
+        rospy.loginfo("Scene: updated robot start state positions %s with finger joints", rs.joint_state.position)
         return rs
-
-    return panda_extended_open_start_state()
+    panda_eos = panda_extended_open_start_state()
+    rospy.loginfo("Scene: setting start state position to extended open start default %s", panda_eos)
+    return panda_eos
 
 
 def sample_goal(bounds: Dict[str, float]) -> Tuple[float, float, float]:
@@ -109,8 +114,7 @@ def make_position_only_constraints(goal: PoseStamped, link_name: str, pos_tol: f
 
     box = SolidPrimitive()
     box.type = SolidPrimitive.BOX
-    box.dimensions = [pos_tol, pos_tol, pos_tol]  # a small box
-
+    box.dimensions = [pos_tol, pos_tol, pos_tol]
     pc.constraint_region.primitives.append(box)
     pc.constraint_region.primitive_poses.append(goal.pose)
 
@@ -118,44 +122,13 @@ def make_position_only_constraints(goal: PoseStamped, link_name: str, pos_tol: f
     return c
 
 
-def summarize(vals: List[float]) -> Dict[str, float]:
-    if not vals:
-        return {"n": 0}
-    v = sorted(vals)
-    return {
-        "n": len(v),
-        "mean": float(statistics.mean(v)),
-        "median": float(statistics.median(v)),
-        "p90": float(v[int(0.90 * (len(v) - 1))]),
-        "min": float(v[0]),
-        "max": float(v[-1]),
-    }
-
-
-def safe_mean(vals: List[float]) -> float:
-    return float(sum(vals) / max(1, len(vals)))
-
-
-def safe_mean_int(vals: List[int]) -> float:
-    return float(sum(vals) / max(1, len(vals)))
-
-
-# ----------------- planning call -----------------
-
-def call_plan(service_proxy: rospy.ServiceProxy, mpr: MotionPlanRequest) -> Tuple[int, float, int, float]:
+def call_plan(service_proxy: rospy.ServiceProxy, mpr: MotionPlanRequest) -> Tuple[int, float, int]:
     """
-    Calls GetMotionPlan and returns:
-      (error_code, planning_time, num_points, wall_time)
-
-    This is the *only* place planners are invoked.
+    Returns: (error_code, planning_time, num_points)
     """
     req = GetMotionPlanRequest()
     req.motion_plan_request = mpr
-
-    t0 = time.time()
     resp = service_proxy(req).motion_plan_response
-    wall = time.time() - t0
-
     code = int(resp.error_code.val)
     ptime = float(resp.planning_time)
 
@@ -164,37 +137,68 @@ def call_plan(service_proxy: rospy.ServiceProxy, mpr: MotionPlanRequest) -> Tupl
         npts = len(resp.trajectory.joint_trajectory.points)
     except Exception:
         npts = 0
+    return code, ptime, npts
 
-    rospy.loginfo("Trajectory planning time=%s, code=%s points = %s", ptime, code, resp.trajectory.joint_trajectory.points)
 
-    return code, ptime, npts, wall
+def summarize(vals: List[float]) -> Dict[str, float]:
+    if not vals:
+        return {"n": 0}
+    vals_sorted = sorted(vals)
+    n = len(vals_sorted)
+    return {
+        "n": n,
+        "mean": statistics.mean(vals_sorted),
+        "median": statistics.median(vals_sorted),
+        "p90": vals_sorted[int(0.90 * (n - 1))],
+        "min": vals_sorted[0],
+        "max": vals_sorted[-1],
+    }
+
+
+def safe_mean(vals: List[float]) -> float:
+    return float(sum(vals) / max(1, len(vals))) if vals else 0.0
 
 
 # ----------------- main benchmark -----------------
 
 def main():
     rospy.init_node("benchmark_100_trials", anonymous=True)
-    rospy.sleep(1.0)
+    rospy.sleep(0.5)
 
-    # Publisher: latched summary (works without custom msg)
-    pub_summary = rospy.Publisher("/benchmark/summary", String, queue_size=1, latch=True)
+    # Publish summary (latched so it persists after script exits)
+    summary_pub = rospy.Publisher("/benchmark/summary", BenchmarkSummary, queue_size=1, latch=True)
+
+    run_id = rospy.get_param("~run_id", f"run_{int(time.time())}")
+    planner_a = rospy.get_param("~planner_a", "OMPL")
+    planner_b = rospy.get_param("~planner_b", "DGM")
 
     # Services
     ompl_service = rospy.get_param("~ompl_service", "/plan_kinematic_path")
-    dgm_service  = rospy.get_param("~dgm_service",  "/dgm/get_motion_plan")
+    dgm_service = rospy.get_param("~dgm_service",  "/dgm/get_motion_plan")
 
     rospy.loginfo("Waiting for services: OMPL=%s DGM=%s", ompl_service, dgm_service)
     rospy.wait_for_service(ompl_service, timeout=60.0)
-    rospy.wait_for_service(dgm_service, timeout=60.0)
+    try:
+        rospy.wait_for_service(dgm_service, timeout=30.0)
+    except rospy.ROSException:
+        rospy.logerr("DGM service not available: %s", dgm_service)
+        # print the closest matches for debugging
+        try:
+            import rosservice
+            svcs = rosservice.get_service_list()
+            cand = [s for s in svcs if "dgm" in s.lower() or "motion_plan" in s.lower()]
+            rospy.logerr("Services containing dgm/motion_plan: %s", cand[:50])
+        except Exception as e:
+            rospy.logerr("Could not list services: %s", e)
+        raise
 
     ompl = rospy.ServiceProxy(ompl_service, GetMotionPlan, persistent=True)
-    dgm  = rospy.ServiceProxy(dgm_service,  GetMotionPlan, persistent=True)
+    dgm = rospy.ServiceProxy(dgm_service,  GetMotionPlan, persistent=True)
 
     group_name = rospy.get_param("~group_name", "panda_arm")
     ee_link = rospy.get_param("~ee_link", "panda_hand")
     world_frame = rospy.get_param("~world_frame", "world")
 
-    # Trials / bounds
     trials = int(rospy.get_param("~trials", 100))
     seed = int(rospy.get_param("~seed", 7))
     random.seed(seed)
@@ -216,25 +220,15 @@ def main():
     vel_scale = float(rospy.get_param("~vel_scale", 0.3))
     acc_scale = float(rospy.get_param("~acc_scale", 0.3))
 
-    run_id = rospy.get_param("~run_id", f"run_{int(time.time())}")
-    out_csv = rospy.get_param("~out_csv", f"/root/catkin_ws/src/object_tracking/results/bench_{run_id}.csv")
+    out_csv = rospy.get_param("~out_csv", "/root/catkin_ws/src/object_tracking/results/bench_100.csv")
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
 
     # Start state
-    scene = None
-    try:
-        scene = get_planning_scene("/get_planning_scene")
-    except Exception as e:
-        rospy.logwarn("Could not fetch planning scene: %s (using default start state)", str(e))
-    # start_state = start_state_from_scene_or_default(scene)
+    scene = get_planning_scene("/get_planning_scene")
+    # start_state = start_state_from_scene_or_default(scene) # start state:RobotState
     start_state = panda_extended_open_start_state()
 
-    rospy.loginfo("Benchmark config: run_id=%s trials=%d seed=%d", run_id, trials, seed)
-    rospy.loginfo("Bounds: %s pos_tol=%.3f", bounds, pos_tol)
-    rospy.loginfo("Planning params: allowed_time=%.2f attempts=%d vel=%.2f acc=%.2f",
-                  allowed_planning_time, num_planning_attempts, vel_scale, acc_scale)
-
-    rows: List[Dict] = []
+    rows = []
     ompl_times_ok: List[float] = []
     dgm_times_ok: List[float] = []
     ompl_pts_ok: List[int] = []
@@ -242,20 +236,24 @@ def main():
     ompl_success = 0
     dgm_success = 0
 
-    # Per-code histograms
-    ompl_code_hist: Dict[int, int] = {}
-    dgm_code_hist: Dict[int, int] = {}
+    rospy.loginfo("Benchmark config: run_id=%s trials=%d seed=%d", run_id, trials, seed)
+    rospy.loginfo("Bounds: %s pos_tol=%.3f", bounds, pos_tol)
+    rospy.loginfo("Planning params: allowed_time=%.2f attempts=%d vel=%.2f acc=%.2f",
+                  allowed_planning_time, num_planning_attempts, vel_scale, acc_scale)
+
+    gx, gy, gz = sample_goal(bounds)
+    goal = make_goal_pose(world_frame, gx, gy, gz)
     rospy.loginfo("Scene Robot Joint names =%s, Start position = %s",
                   scene.robot_state.joint_state.name,
                   scene.robot_state.joint_state.position)
     rospy.loginfo("Start state Robot State names =%s, Start position = %s",
                   start_state.joint_state.name,
                   start_state.joint_state.position)
-    for k in range(trials):
-        gx, gy, gz = sample_goal(bounds)
-        goal = make_goal_pose(world_frame, gx, gy, gz)
 
-        # Build MotionPlanRequest once and re-use for both planners
+    for k in range(trials):
+        # gx, gy, gz = sample_goal(bounds)
+        # goal = make_goal_pose(world_frame, gx, gy, gz)
+
         mpr = MotionPlanRequest()
         mpr.group_name = group_name
         mpr.start_state = start_state
@@ -265,105 +263,93 @@ def main():
         mpr.max_velocity_scaling_factor = vel_scale
         mpr.max_acceleration_scaling_factor = acc_scale
 
-        # ---- OMPL call (uses call_plan) ----
+        # OMPL call
+        t0 = time.time()
         try:
-            ompl_code, ompl_ptime, ompl_npts, ompl_wall = call_plan(ompl, mpr)
-        except Exception as e:
-            rospy.logwarn_throttle(2.0, "OMPL call failed: %s", str(e))
-            ompl_code, ompl_ptime, ompl_npts, ompl_wall = (-999, 0.0, 0, 0.0)
+            ompl_code, ompl_ptime, ompl_npts = call_plan(ompl, mpr)
+        except Exception:
+            ompl_code, ompl_ptime, ompl_npts = (-999, 0.0, 0)
+        ompl_wall = time.time() - t0
 
-        ompl_code_hist[ompl_code] = ompl_code_hist.get(ompl_code, 0) + 1
-        ompl_ok = (ompl_code == 1) and (ompl_npts > 0)
+        # DGM call
+        t0 = time.time()
+        try:
+            dgm_code, dgm_ptime, dgm_npts = call_plan(dgm, mpr)
+        except Exception:
+            dgm_code, dgm_ptime, dgm_npts = (-999, 0.0, 0)
+        dgm_wall = time.time() - t0
+
+        ompl_ok = (ompl_code == 1)
+        dgm_ok = (dgm_code == 1)
+
         if ompl_ok:
             ompl_success += 1
             ompl_times_ok.append(ompl_ptime)
             ompl_pts_ok.append(ompl_npts)
 
-        # ---- DGM call (uses call_plan) ----
-        try:
-            dgm_code, dgm_ptime, dgm_npts, dgm_wall = call_plan(dgm, mpr)
-        except Exception as e:
-            rospy.logwarn_throttle(2.0, "DGM call failed: %s", str(e))
-            dgm_code, dgm_ptime, dgm_npts, dgm_wall = (-999, 0.0, 0, 0.0)
-
-        dgm_code_hist[dgm_code] = dgm_code_hist.get(dgm_code, 0) + 1
-        dgm_ok = (dgm_code == 1) and (dgm_npts > 0)
         if dgm_ok:
             dgm_success += 1
             dgm_times_ok.append(dgm_ptime)
             dgm_pts_ok.append(dgm_npts)
 
-        rows.append({
+        row_data = {
             "trial": k,
-            # "start_x":
             "goal_x": gx, "goal_y": gy, "goal_z": gz,
+            "ompl_code": ompl_code, "ompl_code_msg": decode(ompl_code), "ompl_planning_time": ompl_ptime, "ompl_wall_time": ompl_wall, "ompl_points": ompl_npts,
+            "dgm_code": dgm_code, "dgm_code_msg": decode(dgm_code), "dgm_planning_time": dgm_ptime, "dgm_wall_time": dgm_wall, "dgm_points": dgm_npts,
+        }
 
-            "ompl_code": ompl_code,
-            "ompl_planning_time": ompl_ptime,
-            "ompl_wall_time": ompl_wall,
-            "ompl_points": ompl_npts,
+        rows.append(row_data)
 
-            "dgm_code": dgm_code,
-            "dgm_planning_time": dgm_ptime,
-            "dgm_wall_time": dgm_wall,
-            "dgm_points": dgm_npts,
-        })
+        rospy.loginfo("Row data @ trial %s %s", k, str(row_data)+"\n")
 
         if (k + 1) % 10 == 0:
             rospy.loginfo("Progress %d/%d | OMPL succ=%d DGM succ=%d",
                           k + 1, trials, ompl_success, dgm_success)
 
-    # Write CSV
+    # write CSV
     with open(out_csv, "w", newline="") as f:
         w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
         w.writeheader()
         w.writerows(rows)
 
-    # Stats
+    # stats
     ompl_stats = summarize(ompl_times_ok)
     dgm_stats = summarize(dgm_times_ok)
 
-    summary = {
-        "run_id": run_id,
-        "trials": trials,
-        "seed": seed,
-        "bounds": bounds,
-        "pos_tol": pos_tol,
-        "planning_params": {
-            "allowed_planning_time": allowed_planning_time,
-            "num_planning_attempts": num_planning_attempts,
-            "vel_scale": vel_scale,
-            "acc_scale": acc_scale,
-        },
-        "services": {
-            "ompl": ompl_service,
-            "dgm": dgm_service,
-        },
-        "results": {
-            "ompl_success": ompl_success,
-            "dgm_success": dgm_success,
-            "ompl_success_rate": float(ompl_success) / float(trials),
-            "dgm_success_rate": float(dgm_success) / float(trials),
-            "ompl_time_stats": ompl_stats,
-            "dgm_time_stats": dgm_stats,
-            "ompl_avg_points": safe_mean_int(ompl_pts_ok),
-            "dgm_avg_points": safe_mean_int(dgm_pts_ok),
-            "ompl_code_hist": {str(k): int(v) for k, v in sorted(ompl_code_hist.items())},
-            "dgm_code_hist": {str(k): int(v) for k, v in sorted(dgm_code_hist.items())},
-        },
-        "csv": out_csv,
-    }
-
     rospy.loginfo("============================================")
     rospy.loginfo("Benchmark complete. CSV: %s", out_csv)
+    rospy.loginfo("Trials=%d seed=%d", trials, seed)
     rospy.loginfo("OMPL success: %d/%d (%.1f%%)", ompl_success, trials, 100.0 * ompl_success / trials)
     rospy.loginfo("DGM  success: %d/%d (%.1f%%)", dgm_success, trials, 100.0 * dgm_success / trials)
-    rospy.loginfo("OMPL codes: %s", json.dumps(summary["results"]["ompl_code_hist"]))
-    rospy.loginfo("DGM  codes: %s", json.dumps(summary["results"]["dgm_code_hist"]))
+    rospy.loginfo("OMPL planning_time stats: %s", ompl_stats)
+    rospy.loginfo("DGM  planning_time stats: %s", dgm_stats)
+    rospy.loginfo("OMPL avg points: %.1f", safe_mean([float(x) for x in ompl_pts_ok]))
+    rospy.loginfo("DGM  avg points: %.1f", safe_mean([float(x) for x in dgm_pts_ok]))
     rospy.loginfo("============================================")
 
-    # Publish latched summary
-    pub_summary.publish(String(data=json.dumps(summary)))
+    # Publish summary (latched)
+    msg = BenchmarkSummary()
+    msg.header = Header(stamp=rospy.Time.now(), frame_id=world_frame)
+    msg.run_id = run_id
+    msg.planner_a = planner_a
+    msg.planner_b = planner_b
+    msg.n_trials = trials
+    msg.success_a = ompl_success
+    msg.success_b = dgm_success
+    msg.intercept_success_a = 0
+    msg.intercept_success_b = 0
+    msg.mean_plan_time_a = float(ompl_stats.get("mean", 0.0))
+    msg.std_plan_time_a = float(statistics.pstdev(ompl_times_ok) if len(ompl_times_ok) > 1 else 0.0)
+    msg.mean_plan_time_b = float(dgm_stats.get("mean", 0.0))
+    msg.std_plan_time_b = float(statistics.pstdev(dgm_times_ok) if len(dgm_times_ok) > 1 else 0.0)
+    msg.mean_path_length_a = 0.0
+    msg.mean_path_length_b = 0.0
+    msg.mean_time_to_intercept_a = 0.0
+    msg.mean_time_to_intercept_b = 0.0
+    msg.notes = f"csv={out_csv} seed={seed} pos_tol={pos_tol}"
+
+    summary_pub.publish(msg)
     rospy.loginfo("Published /benchmark/summary (latched).")
 
 
