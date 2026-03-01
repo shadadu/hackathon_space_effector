@@ -12,19 +12,8 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 
 # from .dgm_model import build_input, DGMValueNet
 
-from catkin_ws_src.object_tracking.scripts.dgm_model import load_model, DGMValueNet, build_input
+from object_tracking.scripts.dgm_model import load_model, DGMValueNet, build_input
 from object_tracking.dgm_model import DGMValueNet
-# from dgm_model import DGMValueNet
-# try:
-#     from object_tracking.dgm_model import load_model, DGMValueNet, build_input
-# except ImportError:
-#     # fallback if running directly from source without proper PYTHONPATH
-#     import os, sys
-#     this_dir = os.path.dirname(os.path.abspath(__file__))
-#     pkg_src = os.path.abspath(os.path.join(this_dir, "..", "src"))
-#     if pkg_src not in sys.path:
-#         sys.path.insert(0, pkg_src)
-#     from object_tracking.dgm_model import load_model, DGMValueNet, build_input
 
 
 @dataclass
