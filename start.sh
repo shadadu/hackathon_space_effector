@@ -28,7 +28,7 @@ MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rvi
 
 MASTER_TIMEOUT="${MASTER_TIMEOUT:-20}"
 ASTROBEE_TIMEOUT="${ASTROBEE_TIMEOUT:-100}"
-MOVEIT_TIMEOUT="${MOVEIT_TIMEOUT:-200}"
+MOVEIT_TIMEOUT="${MOVEIT_TIMEOUT:-300}"
 
 ############################################
 # Helpers
@@ -196,6 +196,22 @@ nohup rosrun object_tracking dgm_planner_node.py \
   _ik_service:=/compute_ik \
   _group_name:=panda_arm \
   _ee_link:=panda_hand \
+  > /root/start_logs/dgm_planner.log 2>&1 &
+" >/dev/null
+}
+
+run_train_model() { ## short run to ensure there's a Neural Net model at the model path for testing
+  local container="$1"
+  log "short run to ensure Neural Net model path /root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth
+ is accessible and loads successfully (container=$container)"
+
+  docker exec -d "$container" bash -lc "
+export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
+unset ROS_HOSTNAME
+export ROS_IP=\$(hostname -i | awk '{print \$1}')
+source /opt/ros/noetic/setup.bash
+source /root/catkin_ws/devel/setup.bash
+nohup rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=20 _batch:=192\
   > /root/start_logs/dgm_planner.log 2>&1 &
 " >/dev/null
 }
@@ -515,7 +531,7 @@ ok "MoveIt core services are up"
 start_and_test_jacobian_server "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
 #
 #jacobian_service_test "$MOVEIT_NAME" "$MOVEIT_TIMEOUT"
-
+run_train_model "$MOVEIT_NAME"
 # Services & params
 # Service names can be either global or under /move_group depending on config
 LAST_STEP="wait_services"

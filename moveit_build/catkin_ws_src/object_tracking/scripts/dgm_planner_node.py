@@ -3,6 +3,11 @@ import os
 import time
 import numpy as np
 import rospy
+import torch
+from torch import optim
+
+from pathlib import Path
+import stat
 
 from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
 from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
@@ -28,6 +33,19 @@ def decode(code):
         if isinstance(v, int) and v == code:
             return k
     return str(code)
+
+def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu") -> DGMValueNet:
+    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    opt = optim.Adam(model.parameters(), lr=lr)
+    checkpoint = torch.load(str(path.resolve()))
+    # Load the model state dictionary from the checkpoint
+    model.load_state_dict(checkpoint['model_state_dict'])
+    opt.load_state_dict(checkpoint['optimizer_state_dict'])
+    model.eval()
+    return model
+
+def get_model_from_hf():
+    pass
 
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
@@ -145,7 +163,7 @@ class DGMPlannerService:
         self.service_name = rospy.get_param("~service_name", "/dgm/get_motion_plan")
 
         # DGM model
-        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pt")
+        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth")
         self.device = rospy.get_param("~device", "cpu")
         self.model = None  # type: DGMValueNet
 
@@ -165,12 +183,21 @@ class DGMPlannerService:
         # IK proxy (optional check)
         rospy.wait_for_service(self.ik_service, timeout=60.0)
         self.ik = rospy.ServiceProxy(self.ik_service, GetPositionIK)
-
-        if os.path.exists(self.model_path):
-            self.model = DGMValueNet.load_model(self.model_path, device=self.device)
-            rospy.loginfo("Loaded DGM model: %s", self.model_path)
+        hidden = int(rospy.get_param("~hidden", 256))
+        depth = int(rospy.get_param("~depth", 4))
+        mdl_path = "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
+        path = Path(mdl_path)
+        # Grant owner read/write, and others read (644)
+        path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        rospy.loginfo(f"path is a file {path.is_file()}")
+        rospy.loginfo(f"path is accessible {os.access(path, os.X_OK)}")
+        if Path.exists(path):
+            self.model = load_model(path=path, hidden=hidden, depth=depth, lr=3e-4, device=self.device)
+            rospy.loginfo("Loaded DGM model: %s", mdl_path)
         else:
-            rospy.logwarn("DGM model not found at %s. Planner will return INVALID_MOTION_PLAN.", self.model_path)
+            # rospy.loginfo(f"File path exists? {os.path.exists()}")
+            rospy.loginfo("DGM model not found at %s. Planner will return ROBOT_STATE_STALE.", mdl_path)
+            # raise Exception(f"DGM model not found or not loaded via path {mdl_path}. Planner will return ROBOT_STATE_STALE.")
 
         if self.use_jacobian_hook:
             rospy.wait_for_service(self.jacobian_service, timeout=60.0)
@@ -247,9 +274,10 @@ class DGMPlannerService:
             return GetMotionPlanResponse(motion_plan_response=resp)
 
         if self.model is None:
-            rospy.logerr("DGM model is not loaded; returning INVALID_MOTION_PLAN")
-            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
-            return GetMotionPlanResponse(motion_plan_response=resp)
+            rospy.logerr("DGM model is not loaded; returning ROBOT_STATE_STALE %s", str(self.model))
+            resp.error_code.val = MoveItErrorCodes.ROBOT_STATE_STALE
+            raise Exception("DGMValueNet model not loaded")
+            # return GetMotionPlanResponse(motion_plan_response=resp)
 
         # ---- group joints ----
         group = MoveGroupCommander(mpr.group_name or self.group_name)
@@ -293,7 +321,7 @@ class DGMPlannerService:
             )
         except Exception as e:
             rospy.logerr("DGM rollout failed: %s", str(e))
-            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+            resp.error_code.val = MoveItErrorCodes.PLANNING_FAILED
             return GetMotionPlanResponse(motion_plan_response=resp)
 
         resp.planning_time = float(time.time() - t0)
@@ -304,7 +332,7 @@ class DGMPlannerService:
             ensure_joint_dims(traj, n_joints=len(active_joints))
         except Exception as e:
             rospy.logerr("Trajectory formatting invalid: %s", str(e))
-            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+            resp.error_code.val = MoveItErrorCodes.CONTROL_FAILED
             return GetMotionPlanResponse(motion_plan_response=resp)
 
         # ---- I.4 start consistency ----
@@ -327,7 +355,7 @@ class DGMPlannerService:
         )
         if not ok_limits:
             rospy.logwarn("DGM plan rejected by limit checks: %s", reason)
-            resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
+            resp.error_code.val = MoveItErrorCodes.PREEMPTED
             return GetMotionPlanResponse(motion_plan_response=resp)
 
         # Log jerk / smoothness stats (useful for training penalties)

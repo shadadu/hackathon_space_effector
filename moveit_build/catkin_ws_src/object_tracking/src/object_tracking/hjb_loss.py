@@ -20,7 +20,6 @@ def hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag):
     resid = V_t + running_cost - 0.25 * quad
     return (resid ** 2).mean()
 
-
 def terminal_loss(V_T, phi_T):
     """
     V_T: (B,)

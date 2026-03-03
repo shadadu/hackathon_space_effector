@@ -1,36 +1,40 @@
 <launch>
+  <!-- Time -->
   <arg name="use_sim_time" default="false"/>
   <param name="use_sim_time" value="$(arg use_sim_time)"/>
 
+  <!-- Robot model (prefer xacro if available) -->
   <param name="robot_description"
-         command="$(find xacro)/xacro '$(find moveit_resources_panda_description)/urdf/panda.urdf'"/>
+         command="$(find xacro)/xacro --inorder '$(find moveit_resources_panda_description)/urdf/panda.urdf'"/>
 
   <param name="robot_description_semantic"
          textfile="$(find moveit_resources_panda_moveit_config)/config/panda.srdf"/>
 
-  <!-- Joint states + TF -->
-  <node pkg="joint_state_publisher" type="joint_state_publisher" name="joint_state_publisher" output="screen">
-    <param name="rate" value="50"/>
-    <param name="use_gui" value="false"/>
-    <param name="source_list" value="[]"/>
-  </node>
-
-  <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher" output="screen">
+  <!-- TF from robot_description + joint states (published by MoveIt fake execution) -->
+  <node pkg="robot_state_publisher" type="robot_state_publisher" name="robot_state_publisher"
+        output="screen" required="false" respawn="true">
     <param name="publish_frequency" value="50.0"/>
   </node>
 
+  <!-- Connect global planning frame to robot base -->
   <node pkg="tf2_ros" type="static_transform_publisher" name="world_to_panda"
         args="0 0 0 0 0 0 world panda_link0" />
 
-  <!-- Configs -->
+  <!-- MoveIt configs -->
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/kinematics.yaml"/>
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/joint_limits.yaml"/>
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/ompl_planning.yaml"/>
 
+  <!-- Fake execution -->
   <rosparam command="load" file="$(find moveit_resources_panda_moveit_config)/config/fake_controllers.yaml"/>
   <param name="moveit_controller_manager" value="moveit_fake_controller_manager/MoveItFakeControllerManager"/>
-   
-  <!-- Make MoveIt services deterministic (FK/IK/Planning/Scene) -->
+
+  <!-- Publish planning scene + robot model info (helps downstream consumers) -->
+  <param name="move_group/planning_scene_monitor/publish_robot_description" value="true"/>
+  <param name="move_group/planning_scene_monitor/publish_robot_description_semantic" value="true"/>
+  <param name="move_group/planning_scene_monitor/publish_planning_scene" value="true"/>
+
+  <!-- Make MoveIt services deterministic (FK/IK/Planning/Scene/Validity) -->
   <param name="move_group/capabilities"
          value="move_group/MoveGroupKinematicsService
                 move_group/MoveGroupPlanService

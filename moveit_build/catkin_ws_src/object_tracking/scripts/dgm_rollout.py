@@ -16,17 +16,17 @@ from trajectory_msgs.msg import JointTrajectoryPoint
 from object_tracking.dgm_model import DGMValueNet
 
 
+from dataclasses import dataclass
+
 
 @dataclass
 class RolloutConfig:
-    def __init__(self):
-        super().__init__()
     T: float = 2.0
     dt: float = 0.02
-    vel_limits: np.ndarray = None  # (7,)
-    joint_min: np.ndarray = None   # (7,)
-    joint_max: np.ndarray = None   # (7,)
-    R_diag: np.ndarray = None      # (7,)
+    vel_limits: np.ndarray | None = None
+    joint_min: np.ndarray | None = None
+    joint_max: np.ndarray | None = None
+    R_diag: np.ndarray | None = None
     max_nan_guard: int = 5
 
 
@@ -35,12 +35,12 @@ def clamp(x: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
 
 
 def rollout_dgm_joint_policy(
-    model: DGMValueNet,
-    q0: np.ndarray,
-    goal_pos: np.ndarray,
-    active_joints: List[str],
-    cfg: RolloutConfig,
-    device: str = "cpu",
+        model: DGMValueNet,
+        q0: np.ndarray,
+        goal_pos: np.ndarray,
+        active_joints: List[str],
+        cfg: RolloutConfig,
+        device: str = "cpu",
 ) -> Tuple[RobotTrajectory, np.ndarray]:
     """
     Roll out u* = -0.5 * R^{-1} * grad_q V(q,t,gpos)
@@ -53,6 +53,8 @@ def rollout_dgm_joint_policy(
     assert goal_pos.shape == (3,), f"Expected goal_pos shape (3,), got {goal_pos.shape}"
     assert cfg.vel_limits is not None and cfg.R_diag is not None
     assert cfg.joint_min is not None and cfg.joint_max is not None
+
+    rospy.loginfo("Executing DGM Value Net rollout ")
 
     N = int(round(cfg.T / cfg.dt)) + 1
     q = q0.astype(np.float64).copy()

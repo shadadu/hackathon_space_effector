@@ -28,7 +28,6 @@ class DGMValueNet(nn.Module):
         # x: (B, in_dim)
         return self.net(x).squeeze(-1)  # (B,)
 
-
     def build_input(q: torch.Tensor, t: torch.Tensor, gpos: torch.Tensor) -> torch.Tensor:
         """
         q:   (B,7)
@@ -37,15 +36,51 @@ class DGMValueNet(nn.Module):
         """
         return torch.cat([q, t, gpos], dim=-1)
 
+    # def load_model(path: str, device: str = "cpu") -> DGMValueNet:
+    #     ckpt = torch.load(path, map_location=device)
+    #
+    #     # Case 1: full model was saved
+    #     if isinstance(ckpt, DGMValueNet):
+    #         model = ckpt
+    #
+    #     # Case 2: checkpoint dict
+    #     elif isinstance(ckpt, dict):
+    #
+    #         # Extract state_dict
+    #         state_dict = ckpt.get("state_dict", ckpt)
+    #
+    #         # Infer architecture safely
+    #         in_dim = ckpt.get("in_dim")
+    #         hidden = ckpt.get("hidden")
+    #         depth = ckpt.get("depth")
+    #
+    #         if in_dim is None or hidden is None or depth is None:
+    #             raise ValueError(
+    #                 "Checkpoint missing architecture parameters "
+    #                 "(in_dim, hidden, depth). "
+    #                 "You must save them during training."
+    #             )
+    #
+    #         model = ModelOps.DGMValueNet(
+    #             in_dim=in_dim,
+    #             hidden=hidden,
+    #             depth=depth,
+    #         )
+    #
+    #         # Handle DataParallel
+    #         if list(state_dict.keys())[0].startswith("module."):
+    #             state_dict = {k.replace("module.", ""): v for k, v in state_dict.items()}
+    #
+    #         model.load_state_dict(state_dict)
+    #
+    #     else:
+    #         raise TypeError("Unknown checkpoint format")
+    #
+    #     model.to(device)
+    #     model.eval()
+    #     return model
 
-    def load_model(path: str, device: str = "cpu") -> DGMValueNet:
-        ckpt = torch.load(path, map_location=device)
-        model = DGMValueNet(
-            in_dim=ckpt.get("in_dim", 11),
-            hidden=ckpt.get("hidden", 256),
-            depth=ckpt.get("depth", 4),
-        )
-        model.load_state_dict(ckpt["state_dict"])
-        model.to(device)
-        model.eval()
-        return model
+
+
+
+

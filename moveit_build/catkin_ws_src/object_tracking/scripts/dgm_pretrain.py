@@ -12,6 +12,7 @@ from object_tracking.hjb_loss import hjb_residual_loss, terminal_loss
 from object_tracking.fk_client import FKClient
 
 
+
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
     jmax = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973], dtype=np.float64)
@@ -47,7 +48,7 @@ def main():
     # R_diag = np.asarray(R_diag_inp, dtype=np.float64)
     R_inv_diag = (1.0 / torch.max(R_diag))
 
-    out_path = rospy.get_param("~out_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pt")
+    out_path = rospy.get_param("~out_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth")
 
     group = MoveGroupCommander("panda_arm")
     joint_names = group.get_active_joints()
@@ -62,6 +63,7 @@ def main():
     opt = optim.Adam(model.parameters(), lr=lr)
 
     t0 = time.time()
+    loss = 0.0
     for it in range(1, iters + 1):
         rospy.loginfo("Running iter %s: ", it)
         q_np = np.random.uniform(jmin, jmax, (batch, 7)).astype(np.float64)
@@ -124,19 +126,29 @@ def main():
 
         if it % 500 == 0:
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            save_checkpoint(out_path, model, {
-                "in_dim": 11, "hidden": hidden, "depth": depth,
-                "T": T, "R_diag": R_diag.tolist(),
-                "Qp": Qp, "Qp_terminal": QpT,
-            })
-            rospy.loginfo("Saved: %s", out_path)
+            checkpoint = {
+                'epoch': it + 1,  # Save the next epoch number to start from
+                'model_state_dict': model.state_dict(),
+                'optimizer_state_dict': opt.state_dict(),
+                'loss': loss,
+
+            }
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    save_checkpoint(out_path, model, {
-        "in_dim": 11, "hidden": hidden, "depth": depth,
-        "T": T, "R_diag": R_diag.tolist(),
-        "Qp": Qp, "Qp_terminal": QpT,
-    })
+    checkpoint = {
+        'epoch': 0 + 1,  # Save the next epoch number to start from
+        'model_state_dict': model.state_dict(),
+        'optimizer_state_dict': opt.state_dict(),
+        'loss': loss,
+
+    }
+    torch.save(checkpoint, out_path)
+    # save_checkpoint(out_path, model, {
+    #     "in_dim": 11, "hidden": hidden, "depth": depth,
+    #     "T": T, "R_diag": R_diag.tolist(),
+    #     "Qp": Qp, "Qp_terminal": QpT,
+    # })
+    # # rospy.loginfo("Saved: %s", out_path)
     rospy.loginfo("DONE. Saved final: %s", out_path)
 
 

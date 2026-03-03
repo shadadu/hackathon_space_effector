@@ -165,7 +165,7 @@ def call_plan(service_proxy: rospy.ServiceProxy, mpr: MotionPlanRequest) -> Tupl
     except Exception:
         npts = 0
 
-    rospy.loginfo("Trajectory planning time=%s, code=%s points = %s", ptime, code, resp.trajectory.joint_trajectory.points)
+    rospy.loginfo("Trajectory planning time=%s, code=%s", ptime, code)
 
     return code, ptime, npts, wall
 

@@ -36,3 +36,4 @@ opencv-python>=4.6
 # Logging / Utilities
 # -----------------------------
 tqdm>=4.64
+
