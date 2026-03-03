@@ -3,6 +3,12 @@
   <arg name="use_sim_time" default="false"/>
   <param name="use_sim_time" value="$(arg use_sim_time)"/>
 
+  <node name="joint_state_publisher" pkg="joint_state_publisher" type="joint_state_publisher" output="screen">
+  <rosparam param="source_list">[move_group/fake_controller_joint_states]</rosparam>
+  <param name="rate" value="50"/>
+  <param name="use_gui" value="false"/>
+</node>
+
   <!-- Robot model (prefer xacro if available) -->
   <param name="robot_description"
          command="$(find xacro)/xacro --inorder '$(find moveit_resources_panda_description)/urdf/panda.urdf'"/>
