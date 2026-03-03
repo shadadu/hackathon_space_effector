@@ -22,12 +22,22 @@ from jacobian_server.srv import GetJacobian, GetJacobianRequest
 # from catkin_ws_src.object_tracking.scripts.dgm_model import load_model, DGMValueNet
 
 from object_tracking.dgm_model import DGMValueNet
-from object_tracking.dgm_rollout import DGMRollout # RolloutConfig, rollout_dgm_joint_policy
+from object_tracking.dgm_rollout import DGMRollout
+# from object_tracking.dgm_rollout import RolloutConfig
 
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 from trajectory_msgs.msg import JointTrajectoryPoint
 
-
+from dataclasses import dataclass
+@dataclass
+class RolloutConfig:
+    T: float
+    dt: float
+    vel_limits: np.ndarray # | None = None
+    joint_min: np.ndarray # | None = None
+    joint_max: np.ndarray #| None = None
+    R_diag: np.ndarray #| None = None
+    max_nan_guard: int #= 5
 def decode(code):
     for k, v in MoveItErrorCodes.__dict__.items():
         if isinstance(v, int) and v == code:
@@ -43,9 +53,6 @@ def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cp
     opt.load_state_dict(checkpoint['optimizer_state_dict'])
     model.eval()
     return model
-
-def get_model_from_hf():
-    pass
 
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
@@ -167,7 +174,7 @@ class DGMPlannerService:
         self.device = rospy.get_param("~device", "cpu")
         self.model = None  # type: DGMValueNet
 
-        # Rollout config (your requested values)
+        # Rollout config
         self.T = float(rospy.get_param("~T", 2.0))
         self.dt = float(rospy.get_param("~dt", 0.02))
         self.R_diag = np.array(rospy.get_param("~R_diag", [0.15]*7), dtype=np.float64)
@@ -299,15 +306,23 @@ class DGMPlannerService:
                 return GetMotionPlanResponse(motion_plan_response=resp)
 
         # ---- rollout ----
-        cfg = DGMRollout.RolloutConfig(
+        cfg = RolloutConfig(
             T=self.T,
-            dt=self.dt,
+            dt=float(self.dt),
             vel_limits=self.vel_limits,
             joint_min=self.jmin,
             joint_max=self.jmax,
             R_diag=self.R_diag,
             max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
         )
+
+        T: float
+        dt: float
+        vel_limits: np.ndarray | None  # = None
+        joint_min: np.ndarray | None  # = None
+        joint_max: np.ndarray | None  # = None
+        R_diag: np.ndarray | None  # = None
+        max_nan_guard: int
 
         t0 = time.time()
         try:

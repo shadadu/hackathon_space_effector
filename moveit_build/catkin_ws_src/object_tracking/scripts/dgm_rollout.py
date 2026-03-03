@@ -19,17 +19,27 @@ from object_tracking.dgm_model import DGMValueNet
 from dataclasses import dataclass
 
 
-@dataclass
-class RolloutConfig:
-    T: float = 2.0
-    dt: float = 0.02
-    vel_limits: np.ndarray | None = None
-    joint_min: np.ndarray | None = None
-    joint_max: np.ndarray | None = None
-    R_diag: np.ndarray | None = None
-    max_nan_guard: int = 5
-
-
+#
+#
+# @dataclass
+# class RolloutConfig:
+#     T: float
+#     dt: float
+#     vel_limits: np.ndarray | None # = None
+#     joint_min: np.ndarray | None # = None
+#     joint_max: np.ndarray | None  #= None
+#     R_diag: np.ndarray | None # = None
+#     max_nan_guard: int
+#
+# @dataclass
+# class RolloutConfig:
+#     T: float = 2.0
+#     dt: float = 0.02
+#     vel_limits: np.ndarray | None = None
+#     joint_min: np.ndarray | None = None
+#     joint_max: np.ndarray | None = None
+#     R_diag: np.ndarray | None = None
+#     max_nan_guard: int = 5
 def clamp(x: np.ndarray, lo: np.ndarray, hi: np.ndarray) -> np.ndarray:
     return np.minimum(np.maximum(x, lo), hi)
 
