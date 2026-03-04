@@ -37,6 +37,9 @@ WORKDIR /root/catkin_ws/src
 # Copy ALL local ROS packages into the workspace
 COPY catkin_ws_src/ /root/catkin_ws/src/
 
+# Install Python dependencies
+COPY ./requirements.txt /tmp/requirements.txt
+RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
 # Build
 WORKDIR /root/catkin_ws
