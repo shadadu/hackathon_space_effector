@@ -56,16 +56,17 @@ catkin_package(
 
 catkin_install_python(
   PROGRAMS
-    scripts/object_to_planning_scene.py
-    scripts/dgm_planner_node.py
-    scripts/benchmark_runner.py
-    scripts/benchmark_100_trials.py
-    scripts/intercept_planner.py
-    scripts/intercept_evaluator.py
-    scripts/trajectory_executor_manager.py
-    scripts/dgm_planner_node.py
-    scripts/dgm_train.py
-    scripts/dgm_pretrain.py
-    scripts/dgm_dataset_gen.py
+    src/object_to_planning_scene.py
+    src/dgm_planner_node.py
+    src/benchmark_runner.py
+    src/benchmark_100_trials.py
+    src/intercept_planner.py
+    src/intercept_evaluator.py
+    src/trajectory_executor_manager.py
+    src/dgm_planner_node.py
+    src/dgm_train.py
+    src/dgm_pretrain.py
+    src/dgm_dataset_gen.py
+    src/DGMConfig.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

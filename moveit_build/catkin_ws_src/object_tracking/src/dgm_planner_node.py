@@ -2,6 +2,7 @@
 import os
 import time
 import numpy as np
+# from dgm_model import DGMValueNet
 import rospy
 import torch
 from torch import optim
@@ -19,25 +20,21 @@ from sensor_msgs.msg import JointState
 # Optional Jacobian service hook
 from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
-# from catkin_ws_src.object_tracking.scripts.dgm_model import load_model, DGMValueNet
-
+# from catkin_ws_src.objecttracking.scripts.dgm_model import load_model, DGMValueNet
 from object_tracking.dgm_model import DGMValueNet
-from object_tracking.dgm_rollout import DGMRollout
-# from object_tracking.dgm_rollout import RolloutConfig
-
+from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
-from trajectory_msgs.msg import JointTrajectoryPoint
 
-from dataclasses import dataclass
-@dataclass
-class RolloutConfig:
-    T: float
-    dt: float
-    vel_limits: np.ndarray # | None = None
-    joint_min: np.ndarray # | None = None
-    joint_max: np.ndarray #| None = None
-    R_diag: np.ndarray #| None = None
-    max_nan_guard: int #= 5
+
+# @dataclass
+# class RolloutConfig:
+#     T: float
+#     dt: float
+#     vel_limits: np.ndarray # | None = None
+#     joint_min: np.ndarray # | None = None
+#     joint_max: np.ndarray #| None = None
+#     R_diag: np.ndarray #| None = None
+#     max_nan_guard: int #= 5
 def decode(code):
     for k, v in MoveItErrorCodes.__dict__.items():
         if isinstance(v, int) and v == code:
@@ -170,7 +167,7 @@ class DGMPlannerService:
         self.service_name = rospy.get_param("~service_name", "/dgm/get_motion_plan")
 
         # DGM model
-        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth")
+        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/objecttracking/models/panda_dgm_v1.pth")
         self.device = rospy.get_param("~device", "cpu")
         self.model = None  # type: DGMValueNet
 
@@ -316,17 +313,10 @@ class DGMPlannerService:
             max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
         )
 
-        T: float
-        dt: float
-        vel_limits: np.ndarray | None  # = None
-        joint_min: np.ndarray | None  # = None
-        joint_max: np.ndarray | None  # = None
-        R_diag: np.ndarray | None  # = None
-        max_nan_guard: int
 
         t0 = time.time()
         try:
-            traj, q_hist = DGMRollout.rollout_dgm_joint_policy(
+            traj, q_hist = rollout_dgm_joint_policy(
                 model=self.model,
                 q0=q0,
                 goal_pos=goal_pos,

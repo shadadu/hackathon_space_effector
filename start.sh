@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-set -x  # optional: comment out if too verbose
+#set -x  # optional: comment out if too verbose
 
 LAST_STEP="start"
 trap 'ec=$?; echo -e "\n\033[1;33m[DEBUG]\033[0m start.sh exiting (code=$ec) at step=$LAST_STEP"; exit $ec' EXIT

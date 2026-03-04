@@ -1,5 +1,5 @@
 """
-object_tracking package.
+objecttracking package.
 
 Contains:
 - MoveIt interface helpers
