@@ -30,10 +30,10 @@
   </node>
 
   <!-- Dynamic object -> planning scene -->
-  <node pkg="object_tracking"
-        type="object_to_planning_scene.py"
-        name="object_to_planning_scene"
-        output="screen"/>
+<!--   <node pkg="object_tracking" -->
+<!--         type="object_to_planning_scene.py" -->
+<!--         name="object_to_planning_scene" -->
+<!--         output="screen"/> -->
 
     <!-- Always-on evaluator -->
   <node pkg="object_tracking" type="intercept_evaluator.py" name="intercept_evaluator" output="screen">
@@ -42,6 +42,18 @@
     <param name="object_frame" value="object_link"/>
     <param name="rate_hz" value="50.0"/>
   </node>
+
+  <node pkg="object_tracking" type="tf_broadcaster.py" name="tf_broadcaster" output="screen">
+      <param name="state_topic" value="/object/state_vlm"/>
+      <param name="parent_frame" value="world"/>
+      <param name="child_frame" value="object_link"/>
+    </node>
+
+    <node pkg="object_tracking" type="object_to_planning_scene.py" name="object_to_planning_scene" output="screen">
+      <param name="object_topic" value="/object/state_vlm"/>
+      <param name="frame_id" value="world"/>
+      <param name="object_id" value="free_object"/>
+    </node>
 
   <!-- Manager does plan->execute->retry and gates metrics -->
   <node pkg="object_tracking" type="trajectory_executor_manager.py" name="trajectory_executor_manager" output="screen">

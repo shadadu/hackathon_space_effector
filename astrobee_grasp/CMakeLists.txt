@@ -16,6 +16,7 @@ catkin_install_python(
     scripts/pose_tracker.py
     scripts/object_ekf.py
     scripts/tf_broadcaster.py
+    scripts/vlm_tf_broadcaster.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

@@ -89,7 +89,7 @@ class TrajectoryExecutorManager:
 
     def __init__(self):
         # Inputs
-        self.object_topic = rospy.get_param("~object_topic", "/object/state")
+        self.object_topic = rospy.get_param("~object_topic", "/object/state_vlm")
         self.metrics_topic = rospy.get_param("~metrics_topic", "/intercept/eval/metrics")
 
         # Frames / group

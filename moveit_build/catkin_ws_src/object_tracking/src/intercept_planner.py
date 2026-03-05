@@ -77,7 +77,7 @@ class InterceptPlanner:
     def __init__(self):
 
         # Parameters
-        self.object_topic = rospy.get_param("~object_topic", "/object/state")
+        self.object_topic = rospy.get_param("~object_topic", "/object/state_vlm")
         self.world_frame = rospy.get_param("~world_frame", "world")
         self.ee_link = rospy.get_param("~ee_link", "panda_hand")
         self.group_name = rospy.get_param("~group_name", "panda_arm")

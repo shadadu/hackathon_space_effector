@@ -67,6 +67,7 @@ catkin_install_python(
     src/dgm_train.py
     src/dgm_pretrain.py
     src/dgm_dataset_gen.py
-    src/DGMConfig.py
+    src/vlm_tf_broadcaster.py
+    src/tf_broadcaster.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )

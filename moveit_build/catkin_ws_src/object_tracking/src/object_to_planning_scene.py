@@ -8,9 +8,11 @@ from geometry_msgs.msg import Pose
 
 class ObjectPlanningSceneUpdater:
     def __init__(self):
-        self.object_topic = rospy.get_param("~object_topic", "/object/state")
+        self.object_topic = rospy.get_param("~object_topic", "/object/state_vlm")
         self.frame_id = rospy.get_param("~frame_id", "world")
         self.object_id = rospy.get_param("~object_id", "free_object")
+
+        self.object_added = False
 
         # Simple object geometry (box) — tune later
         self.size_x = rospy.get_param("~size_x", 0.06)
@@ -55,7 +57,9 @@ class ObjectPlanningSceneUpdater:
         co.header.stamp = rospy.Time.now()
         co.header.frame_id = frame_id
         co.id = self.object_id
-        co.operation = CollisionObject.ADD
+
+        # ADD first time, MOVE afterwards
+        co.operation = CollisionObject.ADD if not self.object_added else CollisionObject.MOVE
 
         primitive = SolidPrimitive()
         primitive.type = SolidPrimitive.BOX
@@ -65,6 +69,9 @@ class ObjectPlanningSceneUpdater:
         co.primitive_poses = [pose]
 
         self.pub_co.publish(co)
+
+        if not self.object_added:
+            self.object_added = True
 
 def main():
     rospy.init_node("object_to_planning_scene")
