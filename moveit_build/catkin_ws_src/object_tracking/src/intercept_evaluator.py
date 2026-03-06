@@ -47,8 +47,7 @@ class InterceptEvaluator:
 
     def lookup(self, target, source):
         # target <- source
-        return self.tfbuf.lookup_transform(target, source, rospy.Time(0), self.tf_timeout, rclpy.time.Time(),
-                                           rclpy.duration.Duration(seconds=1.0))
+        return self.tfbuf.lookup_transform(target, source, rospy.Time(0), self.tf_timeout)
 
     def on_timer(self, _evt):
         try:
