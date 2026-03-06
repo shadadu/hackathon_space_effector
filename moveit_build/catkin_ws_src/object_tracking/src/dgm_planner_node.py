@@ -26,20 +26,13 @@ from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy,
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 
-# @dataclass
-# class RolloutConfig:
-#     T: float
-#     dt: float
-#     vel_limits: np.ndarray # | None = None
-#     joint_min: np.ndarray # | None = None
-#     joint_max: np.ndarray #| None = None
-#     R_diag: np.ndarray #| None = None
-#     max_nan_guard: int #= 5
+
 def decode(code):
     for k, v in MoveItErrorCodes.__dict__.items():
         if isinstance(v, int) and v == code:
             return k
     return str(code)
+
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu") -> DGMValueNet:
     model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
@@ -51,9 +44,10 @@ def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cp
     model.eval()
     return model
 
+
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
-    jmax = np.array([ 2.8973,  1.7628,  2.8973, -0.0698,  2.8973,  3.7525,  2.8973], dtype=np.float64)
+    jmax = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973], dtype=np.float64)
     return jmin, jmax
 
 
@@ -65,17 +59,20 @@ def default_vel_limits():
 def finite(x: np.ndarray) -> bool:
     return np.all(np.isfinite(x))
 
+
 def compute_derivatives(q_hist: np.ndarray, dt: float):
     # q_hist: (N,7)
-    qdot = np.diff(q_hist, axis=0) / dt              # (N-1,7)
-    qdd  = np.diff(qdot, axis=0) / dt                # (N-2,7)
-    qjerk = np.diff(qdd, axis=0) / dt                # (N-3,7)
+    qdot = np.diff(q_hist, axis=0) / dt  # (N-1,7)
+    qdd = np.diff(qdot, axis=0) / dt  # (N-2,7)
+    qjerk = np.diff(qdd, axis=0) / dt  # (N-3,7)
     return qdot, qdd, qjerk
+
 
 def enforce_time_monotone(traj: RobotTrajectory, dt: float):
     # rewrite time_from_start to be monotone and consistent with dt
     for k, pt in enumerate(traj.joint_trajectory.points):
         pt.time_from_start = rospy.Duration.from_sec(k * dt)
+
 
 def ensure_joint_dims(traj: RobotTrajectory, n_joints: int):
     jn = traj.joint_trajectory.joint_names
@@ -86,6 +83,7 @@ def ensure_joint_dims(traj: RobotTrajectory, n_joints: int):
         if pt.velocities and len(pt.velocities) != n_joints:
             raise RuntimeError(f"Waypoint {k}: velocities len={len(pt.velocities)} != {n_joints}")
 
+
 def robot_state_from_q(active_joints, q: np.ndarray) -> RobotState:
     rs = RobotState()
     js = JointState()
@@ -93,6 +91,7 @@ def robot_state_from_q(active_joints, q: np.ndarray) -> RobotState:
     js.position = [float(x) for x in q.tolist()]
     rs.joint_state = js
     return rs
+
 
 def check_limits(q_hist, jmin, jmax, vel_limits, dt,
                  acc_limits=None, jerk_limits=None):
@@ -116,7 +115,7 @@ def check_limits(q_hist, jmin, jmax, vel_limits, dt,
     if np.any(vmax > (vel_limits + 1e-6)):
         return False, f"velocity_limit_violation vmax={vmax}", {"vmax": vmax}
 
-    # if you don't have explicit acc/jerk limits yet, we still compute them for logging/penalty
+    # if we don't have explicit acc/jerk limits yet, we still compute them for logging/penalty
     amax = np.max(np.abs(qdd), axis=0) if qdd.shape[0] else np.zeros(7)
     jmaxv = np.max(np.abs(qjerk), axis=0) if qjerk.shape[0] else np.zeros(7)
 
@@ -130,12 +129,13 @@ def check_limits(q_hist, jmin, jmax, vel_limits, dt,
 
     return True, "ok", {"vmax": vmax, "amax": amax, "jmax": jmaxv}
 
+
 def validate_with_moveit_state_validity(
-    svc: rospy.ServiceProxy,
-    active_joints,
-    q_hist: np.ndarray,
-    group_name: str,
-    stride: int = 5
+        svc: rospy.ServiceProxy,
+        active_joints,
+        q_hist: np.ndarray,
+        group_name: str,
+        stride: int = 5
 ):
     """
     Subsample trajectory states and call /check_state_validity.
@@ -154,7 +154,9 @@ def validate_with_moveit_state_validity(
         # resp.valid is bool in MoveIt
         if not resp.valid:
             return False, k, "collision_or_constraints_invalid"
+    rospy.loginfo("MoveIt state validity passed", req.robot_state )
     return True, -1, "ok"
+
 
 class DGMPlannerService:
     def __init__(self):
@@ -174,7 +176,7 @@ class DGMPlannerService:
         # Rollout config
         self.T = float(rospy.get_param("~T", 2.0))
         self.dt = float(rospy.get_param("~dt", 0.02))
-        self.R_diag = np.array(rospy.get_param("~R_diag", [0.15]*7), dtype=np.float64)
+        self.R_diag = np.array(rospy.get_param("~R_diag", [0.15] * 7), dtype=np.float64)
         self.vel_limits = np.array(rospy.get_param("~vel_limits", default_vel_limits().tolist()), dtype=np.float64)
 
         self.jmin, self.jmax = panda_joint_limits()
@@ -240,7 +242,8 @@ class DGMPlannerService:
             ikreq.ik_request.ik_link_name = self.ee_link
             ikreq.ik_request.pose_stamped.header.frame_id = goal_frame
             ikreq.ik_request.pose_stamped.pose = goal_pose
-            ikreq.ik_request.robot_state = mpr.start_state if (mpr.start_state and mpr.start_state.joint_state.name) else self.robot.get_current_state()
+            ikreq.ik_request.robot_state = mpr.start_state if (
+                        mpr.start_state and mpr.start_state.joint_state.name) else self.robot.get_current_state()
             ikreq.ik_request.timeout = rospy.Duration(0.2)
             ikresp = self.ik(ikreq)
             return ikresp.error_code.val == MoveItErrorCodes.SUCCESS
@@ -280,8 +283,8 @@ class DGMPlannerService:
         if self.model is None:
             rospy.logerr("DGM model is not loaded; returning ROBOT_STATE_STALE %s", str(self.model))
             resp.error_code.val = MoveItErrorCodes.ROBOT_STATE_STALE
-            raise Exception("DGMValueNet model not loaded")
-            # return GetMotionPlanResponse(motion_plan_response=resp)
+            # raise Exception("DGMValueNet model not loaded")
+            return GetMotionPlanResponse(motion_plan_response=resp)
 
         # ---- group joints ----
         group = MoveGroupCommander(mpr.group_name or self.group_name)
@@ -312,7 +315,6 @@ class DGMPlannerService:
             R_diag=self.R_diag,
             max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
         )
-
 
         t0 = time.time()
         try:

@@ -6,6 +6,7 @@ from moveit_msgs.msg import CollisionObject
 from shape_msgs.msg import SolidPrimitive
 from geometry_msgs.msg import Pose
 
+
 class ObjectPlanningSceneUpdater:
     def __init__(self):
         self.object_topic = rospy.get_param("~object_topic", "/object/state")
@@ -66,10 +67,12 @@ class ObjectPlanningSceneUpdater:
 
         self.pub_co.publish(co)
 
+
 def main():
     rospy.init_node("object_to_planning_scene")
     ObjectPlanningSceneUpdater()
     rospy.spin()
+
 
 if __name__ == "__main__":
     main()

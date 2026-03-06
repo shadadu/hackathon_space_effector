@@ -47,12 +47,14 @@ class InterceptEvaluator:
 
     def lookup(self, target, source):
         # target <- source
-        return self.tfbuf.lookup_transform(target, source, rospy.Time(0), self.tf_timeout)
+        return self.tfbuf.lookup_transform(target, source, rospy.Time(0), self.tf_timeout, rclpy.time.Time(),
+                                           rclpy.duration.Duration(seconds=1.0))
 
     def on_timer(self, _evt):
         try:
             Tw_e = self.lookup(self.world_frame, self.ee_frame)  # world<-ee
             Tw_o = self.lookup(self.world_frame, self.object_frame)  # world<-object
+            rospy.loginfo("Proximity metrics: world->end-effector=%s ; world->object=%s", str(Tw_e), str(Tw_o))
         except Exception as e:
             rospy.logwarn_throttle(2.0, "TF lookup failed: %s", str(e))
             return
@@ -69,6 +71,7 @@ class InterceptEvaluator:
         dy = oy - ey
         dz = oz - ez
         dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+        rospy.loginfo("Proximity metrics: euclidean dist=%s", dist)
 
         # orientation difference (optional)
         qe = (
@@ -85,6 +88,8 @@ class InterceptEvaluator:
         )
         qerr = quat_mul(quat_conj(qe), qo)
         ang = quat_angle(qerr)
+
+        rospy.loginfo("Proximity metrics: euclidean dist=%s orientation diff=%s", dist, ang)
 
         msg = InterceptMetrics()
         msg.header.stamp = rospy.Time.now()
