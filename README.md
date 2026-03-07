@@ -8,7 +8,10 @@ Stack:
 
 # Platform
 Currently development is on a Apple Silicon with Docker containerization for our research and benchmarking. Better performance (and possibly less boilerplate) would be achieved with Linux
-Ubuntu since Astrobee and MoveIt are all ubuntu-native. 
+Ubuntu since Astrobee and MoveIt are all Ubuntu-native. 
+
+# Coding Assistance
+ChaptGPT 5.2
 
 # Running the services
 The stack provides a simulation platform for researching and testing micro-gravity environment Optimal Control and Deep Learning based trajectory planners and executors.
