@@ -7,7 +7,7 @@ Stack:
 2. MoveIt: https://moveit.picknik.ai/main/index.html
 
 # Platform
-Currently development is on a Apple Silicon for our research and benchmarking. Better performance (and possibly less boilerplate) would be achieved with Linux
+Currently development is on a Apple Silicon with Docker containerization for our research and benchmarking. Better performance (and possibly less boilerplate) would be achieved with Linux
 Ubuntu since Astrobee and MoveIt are all ubuntu-native. 
 
 # Running the services
