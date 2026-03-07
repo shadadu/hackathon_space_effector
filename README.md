@@ -34,8 +34,8 @@ Mainly, DGM (using Hamilton-Jacobi-Method) training happens offline. During infe
 trajectory for invalid states using in a manner replicating OMPL's checks for invalid trajectories. Other checks and constraints are also applied
 to ensure that the DGM trajectories are smooth and valid and would transfer well to real robots safely. A current exploration is into how to 
 introduce these constraints as penalties in the DGM cost function and/or whether to train a small neural network to predict invalid/valid states to help 
-with the DGM trajectory rollouts. Though DGM (with minimal training) is currently reaching goals just like OMPL, it's taking longer times and tries; 
-this could be improved upon with some of these validity checks baked in. 
+with the DGM trajectory rollouts. Though DGM (with minimal training) is currently generating valid trajectories just like OMPL, it's taking longer times and tries; 
+it could be improved upon with some of these validity checks baked in. 
  
 Online, a free-flying object instantiated by Astrobee provides the object location and pose to the Trajectory Executor Manager,
 scene planning, and intercept planning services in the moveit container. Both or either of OMPL and DGM planners are called 
