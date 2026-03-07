@@ -19,6 +19,12 @@ To start:
 # Training DGM
 1. rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=300 _batch:=192
 
+# Work in Progress
+1. Improve DGM-HJB training and intercept algorithms.
+2. Ensure DGM better includes valid trajectory and valid/invalid states checking via cost function penalties, constrains 
+    or a neural network prediction.
+3. Improve intercept planning/metrics from proximity to contact and grasping.
+
 # Architecture
 There are mainly two(2) docker containers (astrobee and moveit) that communicate by a ros bridge container.
 Object instantiation and Perception are handled in the astrobee container which uses NASA's astrobee project
@@ -40,12 +46,6 @@ it could be improved upon with some of these validity checks baked in.
 Online, a free-flying object instantiated by Astrobee provides the object location and pose to the Trajectory Executor Manager,
 scene planning, and intercept planning services in the moveit container. Both or either of OMPL and DGM planners are called 
 to generate trajectories for intercepting the object. Intercept metrics are then computed for benchmarking DGM. 
-
-# Work in Progress
-1. Improve DGM-HJB training and intercept algorithms.
-2. Ensure DGM better includes valid trajectory and valid/invalid states checking via cost function penalties, constrains 
-    or a neural network prediction.
-3. Intercept planning and metrics from proximity to contact and grasping.
 
 
 
@@ -115,4 +115,4 @@ to generate trajectories for intercepting the object. Intercept metrics are then
 
 
 # References
-To be provided.
+TBD.
