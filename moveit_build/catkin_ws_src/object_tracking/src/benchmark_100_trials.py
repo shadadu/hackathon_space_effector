@@ -52,8 +52,8 @@ def get_planning_scene(service_name: str = "/get_planning_scene"):
 
     req = GetPlanningSceneRequest()
     req.components.components = (
-        PlanningSceneComponents.ROBOT_STATE |
-        PlanningSceneComponents.SCENE_SETTINGS
+            PlanningSceneComponents.ROBOT_STATE |
+            PlanningSceneComponents.SCENE_SETTINGS
     )
     return srv(req).scene
 
@@ -181,14 +181,14 @@ def main():
 
     # Services
     ompl_service = rospy.get_param("~ompl_service", "/plan_kinematic_path")
-    dgm_service  = rospy.get_param("~dgm_service",  "/dgm/get_motion_plan")
+    dgm_service = rospy.get_param("~dgm_service", "/dgm/get_motion_plan")
 
     rospy.loginfo("Waiting for services: OMPL=%s DGM=%s", ompl_service, dgm_service)
     rospy.wait_for_service(ompl_service, timeout=60.0)
     rospy.wait_for_service(dgm_service, timeout=60.0)
 
     ompl = rospy.ServiceProxy(ompl_service, GetMotionPlan, persistent=True)
-    dgm  = rospy.ServiceProxy(dgm_service,  GetMotionPlan, persistent=True)
+    dgm = rospy.ServiceProxy(dgm_service, GetMotionPlan, persistent=True)
 
     group_name = rospy.get_param("~group_name", "panda_arm")
     ee_link = rospy.get_param("~ee_link", "panda_hand")
@@ -228,6 +228,7 @@ def main():
         rospy.logwarn("Could not fetch planning scene: %s (using default start state)", str(e))
     # start_state = start_state_from_scene_or_default(scene)
     start_state = panda_extended_open_start_state()
+    scene.robot_state.joint_state.position = start_state.joint_state.position
 
     rospy.loginfo("Benchmark config: run_id=%s trials=%d seed=%d", run_id, trials, seed)
     rospy.loginfo("Bounds: %s pos_tol=%.3f", bounds, pos_tol)
@@ -253,6 +254,7 @@ def main():
                   start_state.joint_state.position)
     for k in range(trials):
         gx, gy, gz = sample_goal(bounds)
+        rospy.loginfo("Benchmark trials, goal: gx= %s, gy=%s, gz=%s", gx, gy, gz)
         goal = make_goal_pose(world_frame, gx, gy, gz)
 
         # Build MotionPlanRequest once and re-use for both planners
@@ -266,8 +268,10 @@ def main():
         mpr.max_acceleration_scaling_factor = acc_scale
 
         # ---- OMPL call (uses call_plan) ----
+        rospy.loginfo("OMPL call try ===========================")
         try:
             ompl_code, ompl_ptime, ompl_npts, ompl_wall = call_plan(ompl, mpr)
+            rospy.loginfo("OMPL call success ===================")
         except Exception as e:
             rospy.logwarn_throttle(2.0, "OMPL call failed: %s", str(e))
             ompl_code, ompl_ptime, ompl_npts, ompl_wall = (-999, 0.0, 0, 0.0)
@@ -280,8 +284,10 @@ def main():
             ompl_pts_ok.append(ompl_npts)
 
         # ---- DGM call (uses call_plan) ----
+        rospy.loginfo("DGM call try **************************")
         try:
             dgm_code, dgm_ptime, dgm_npts, dgm_wall = call_plan(dgm, mpr)
+            rospy.loginfo("DGM call success ****************** ")
         except Exception as e:
             rospy.logwarn_throttle(2.0, "DGM call failed: %s", str(e))
             dgm_code, dgm_ptime, dgm_npts, dgm_wall = (-999, 0.0, 0, 0.0)
@@ -292,6 +298,14 @@ def main():
             dgm_success += 1
             dgm_times_ok.append(dgm_ptime)
             dgm_pts_ok.append(dgm_npts)
+
+        rospy.loginfo("k=%s, Scene Robot Joint names =%s, Start position = %s",
+                      k,
+                      scene.robot_state.joint_state.name,
+                      scene.robot_state.joint_state.position)
+        rospy.loginfo("Start state Robot State names =%s, Start position = %s",
+                      start_state.joint_state.name,
+                      start_state.joint_state.position)
 
         rows.append({
             "trial": k,

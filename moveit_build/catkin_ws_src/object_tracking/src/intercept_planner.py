@@ -92,10 +92,10 @@ class InterceptPlanner:
 
         self.v_ee_max = rospy.get_param("~v_ee_max", 0.6)
 
-        self.pos_tol = rospy.get_param("~pos_tol", 0.02)
-        self.ang_tol = rospy.get_param("~ang_tol", 0.3)
+        self.pos_tol = rospy.get_param("~pos_tol", 1.0)
+        self.ang_tol = rospy.get_param("~ang_tol", 3.142)
 
-        self.allowed_planning_time = rospy.get_param("~allowed_planning_time", 2.0)
+        self.allowed_planning_time = rospy.get_param("~allowed_planning_time", 6.0)
 
         self.start_state = panda_extended_open_start_state()
 
@@ -271,7 +271,7 @@ class InterceptPlanner:
         req.ik_request.ik_link_name = self.ee_link
         req.ik_request.pose_stamped = goal
         req.ik_request.robot_state = self.start_state
-        req.ik_request.timeout = rospy.Duration(0.15)
+        req.ik_request.timeout = rospy.Duration(2)
         resp = self.ik(req)
         return resp.error_code.val == 1
 

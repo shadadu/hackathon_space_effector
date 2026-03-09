@@ -186,11 +186,6 @@ start_dgm_service() {
   log "Starting DGM planner service node manually (container=$container)"
 
   docker exec -d "$container" bash -lc "
-export ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311
-unset ROS_HOSTNAME
-export ROS_IP=\$(hostname -i | awk '{print \$1}')
-source /opt/ros/noetic/setup.bash
-source /root/catkin_ws/devel/setup.bash
 nohup rosrun object_tracking dgm_planner_node.py \
   _service_name:=/dgm/get_motion_plan \
   _ik_service:=/compute_ik \
@@ -539,7 +534,7 @@ log "Discovering IK / Plan / DGM / Jacobian services"
 
 IK_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/compute_ik" "/move_group/compute_ik" || true)"
 PLAN_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/plan_kinematic_path" "/move_group/plan_kinematic_path" || true)"
-start_dgm_service "$MOVEIT_NAME"
+#start_dgm_service "$MOVEIT_NAME"
 DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/dgm/get_motion_plan" || true)"
 #DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" 20 "/dgm/get_motion_plan" || true)"
 
@@ -553,7 +548,7 @@ DGM_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/dgm/get_motio
 JAC_SVC="$(wait_for_service_any "$MOVEIT_NAME" "$MOVEIT_TIMEOUT" "/get_jacobian" "/jacobian_server/get_jacobian" || true)"
 
 # If any are empty, dump diagnostics and fail explicitly
-if [[ -z "${IK_SVC:-}" || -z "${PLAN_SVC:-}" || -z "${DGM_SVC:-}" || -z "${JAC_SVC:-}" ]]; then
+if [[ -z "${IK_SVC:-}" || -z "${PLAN_SVC:-}" || -z "${JAC_SVC:-}" ]]; then
   warn "One or more services not found."
   ros_exec "$MOVEIT_NAME" "rosservice list | head -n 200" || true
   fail "Service discovery failed (IK='$IK_SVC' PLAN='$PLAN_SVC' DGM='$DGM_SVC' JAC='$JAC_SVC')"
@@ -561,7 +556,7 @@ fi
 
 ok "Found IK service: $IK_SVC"
 ok "Found planning service: $PLAN_SVC"
-ok "Found DGM service: $DGM_SVC"
+#ok "Found DGM service: $DGM_SVC"
 ok "Found Jacobian service: $JAC_SVC"
 
 

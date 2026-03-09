@@ -5,6 +5,7 @@ import threading
 import math
 import rospy
 import actionlib
+from actionlib_msgs.msg import GoalStatus
 
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
@@ -105,12 +106,12 @@ class TrajectoryExecutorManager:
 
         # Defaults (overridable per trial)
         self.max_attempts_default = int(rospy.get_param("~max_attempts", 5))
-        self.eval_window_default = float(rospy.get_param("~eval_window_s", 2.5))
-        self.eps_pos_default = float(rospy.get_param("~eps_pos", 0.03))
-        self.eps_ang_default = float(rospy.get_param("~eps_ang", 0.35))
+        self.eval_window_default = float(rospy.get_param("~eval_window_s", 5.0))
+        self.eps_pos_default = float(rospy.get_param("~eps_pos", 0.3))
+        self.eps_ang_default = float(rospy.get_param("~eps_ang", 3.14))
 
         # Planning params
-        self.allowed_planning_time = float(rospy.get_param("~allowed_planning_time", 2.0))
+        self.allowed_planning_time = float(rospy.get_param("~allowed_planning_time", 6.0))
         self.num_planning_attempts = int(rospy.get_param("~num_planning_attempts", 3))
         self.vel_scale = float(rospy.get_param("~vel_scale", 0.3))
         self.acc_scale = float(rospy.get_param("~acc_scale", 0.3))
@@ -173,12 +174,17 @@ class TrajectoryExecutorManager:
         return (age >= 0.0) and (age <= self.object_max_age_s)
 
     def pick_goal_pose(self, odom: Odometry) -> PoseStamped:
-        # Minimal V1: go to object's current pose (you can replace with intercept selection logic)
         goal = PoseStamped()
         goal.header.stamp = rospy.Time.now()
         goal.header.frame_id = odom.header.frame_id or self.world_frame
         goal.pose.position = odom.pose.pose.position
-        goal.pose.orientation = odom.pose.pose.orientation
+
+        # Use a fixed grasp-friendly orientation instead of just copying the object orientation.
+        goal.pose.orientation.x = 1.0
+        goal.pose.orientation.y = 0.0
+        goal.pose.orientation.z = 0.0
+        goal.pose.orientation.w = 0.0
+
         return goal
 
     def build_mpr(self, goal: PoseStamped, eps_pos: float, eps_ang: float) -> MotionPlanRequest:
@@ -211,9 +217,18 @@ class TrajectoryExecutorManager:
 
     def cancel_execution(self):
         try:
-            self.exec_client.cancel_goal()
-        except Exception:
-            pass
+            state = self.exec_client.get_state()
+            if state in (
+                    GoalStatus.PENDING,
+                    GoalStatus.ACTIVE,
+                    GoalStatus.PREEMPTING,
+                    GoalStatus.RECALLING,
+            ):
+                self.exec_client.cancel_goal()
+            else:
+                rospy.logdebug("Skip cancel_execution: action state=%s", str(state))
+        except Exception as e:
+            rospy.logwarn("cancel_execution failed: %s", str(e))
 
     # ----------------- Trial engine -----------------
     def _new_trial_id(self, given: str):
@@ -238,6 +253,7 @@ class TrajectoryExecutorManager:
             "min_dist": float("inf"),
             "min_ang": float("inf"),
             "planner_time_s": None,
+            "execution_sent": False,
         }
         rospy.loginfo("START trial=%s planner=%s max_attempts=%d eps_pos=%.3f eps_ang=%.3f window=%.2f",
                       trial_id, planner_service, max_attempts, eps_pos, eps_ang, eval_window_s)
@@ -245,6 +261,7 @@ class TrajectoryExecutorManager:
     def _finish_trial(self, success: bool, reason: str):
         if self.active is None:
             return
+        self.active["execution_sent"] = False
         tid = self.active["trial_id"]
         planner = self.active["planner_service"]
         k = self.active["attempt_idx"]
@@ -277,6 +294,8 @@ class TrajectoryExecutorManager:
                 return
 
             goal = self.pick_goal_pose(self.last_odom)
+            rospy.loginfo("Trajectory exctr mgr goal: %s, %s, %s",
+                          goal.pose.position.x, goal.pose.position.y, goal.pose.position.z)
             mpr = self.build_mpr(goal, self.active["eps_pos"], self.active["eps_ang"])
 
             self.publish_status(f"PLANNING {self.active['trial_id']} attempt={self.active['attempt_idx']}")
@@ -304,6 +323,7 @@ class TrajectoryExecutorManager:
             self.active["attempt_deadline_t"] = now + self.active["eval_window_s"]
             self.publish_status(f"EXECUTING {self.active['trial_id']} attempt={self.active['attempt_idx']}")
             self.execute_trajectory(plan_resp.trajectory)
+            self.active["execution_sent"] = True
             return
 
         # Attempt running: check verdict inside window
@@ -319,7 +339,9 @@ class TrajectoryExecutorManager:
 
         # Fail if exceeded window
         if now > self.active["attempt_deadline_t"]:
-            self.cancel_execution()
+            if self.active.get("execution_sent", False):
+                self.cancel_execution()
+
             self.active["attempt_idx"] += 1
             if self.active["attempt_idx"] >= self.active["max_attempts"]:
                 self._finish_trial(False, "timeout_window")
@@ -328,6 +350,7 @@ class TrajectoryExecutorManager:
             # Reset for replanning next tick
             self.active["attempt_start_t"] = None
             self.active["attempt_deadline_t"] = None
+            self.active["execution_sent"] = False
             self.publish_status(f"REPLAN {self.active['trial_id']} next_attempt={self.active['attempt_idx']}")
             return
 

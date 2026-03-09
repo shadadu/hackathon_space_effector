@@ -25,6 +25,8 @@ from object_tracking.dgm_model import DGMValueNet
 from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
+import moveit_commander
+
 
 
 def decode(code):
@@ -154,7 +156,7 @@ def validate_with_moveit_state_validity(
         # resp.valid is bool in MoveIt
         if not resp.valid:
             return False, k, "collision_or_constraints_invalid"
-    rospy.loginfo("MoveIt state validity passed", req.robot_state )
+    # rospy.loginfo("MoveIt state validity passed", req.robot_state )
     return True, -1, "ok"
 
 
@@ -407,6 +409,8 @@ class DGMPlannerService:
         # ---- success ----
         resp.trajectory = traj
         resp.error_code.val = MoveItErrorCodes.SUCCESS
+        ee_state = self.robot.get_current_state()
+        # rospy.loginfo("Current end-effector/hand state= $s", ee_state)
         return GetMotionPlanResponse(motion_plan_response=resp)
 
 

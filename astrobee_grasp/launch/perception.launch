@@ -9,22 +9,22 @@
   <!-- Pose Tracker Node     -->
   <!-- ===================== -->
   <!-- Produces /object/pose_tracked -->
-  <node pkg="astrobee_grasp"
-        type="pose_tracker.py"
-        name="pose_tracker"
-        output="screen">
-  </node>
+<!--   <node pkg="astrobee_grasp" -->
+<!--         type="pose_tracker.py" -->
+<!--         name="pose_tracker" -->
+<!--         output="screen"> -->
+<!--   </node> -->
 
   <!-- ===================== -->
   <!-- Object EKF Node       -->
   <!-- ===================== -->
   <!-- Consumes /object/pose_tracked -->
   <!-- Publishes /object/state -->
-  <node pkg="astrobee_grasp"
-        type="object_ekf.py"
-        name="object_ekf"
-        output="screen">
-  </node>
+<!--   <node pkg="astrobee_grasp" -->
+<!--         type="object_ekf.py" -->
+<!--         name="object_ekf" -->
+<!--         output="screen"> -->
+<!--   </node> -->
 
   <!-- ===================== -->
   <!-- TF Broadcaster        -->
@@ -35,5 +35,19 @@
         name="tf_broadcaster"
         output="screen">
   </node>
+
+  <node pkg="astrobee_grasp" type="object_simulator.py" name="object_simulator" output="screen">
+      <param name="topic" value="/object/state"/>
+      <param name="drift" value="false"/>
+      <param name="init_x" value="0.50"/>
+      <param name="init_y" value="0.00"/>
+      <param name="init_z" value="0.25"/>
+  </node>
+
+    <param name="drift" value="true"/>
+    <param name="vx" value="-0.02"/>
+    <param name="vy" value="0.01"/>
+    <param name="vz" value="0.00"/>
+    <param name="bounce" value="true"/>
 
 </launch>
