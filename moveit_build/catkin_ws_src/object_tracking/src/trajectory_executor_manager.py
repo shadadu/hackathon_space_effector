@@ -6,6 +6,7 @@ import math
 import rospy
 import actionlib
 from actionlib_msgs.msg import GoalStatus
+import threading
 
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
@@ -13,6 +14,8 @@ from std_msgs.msg import String
 from moveit_msgs.srv import GetMotionPlan, GetMotionPlanRequest
 from moveit_msgs.msg import MotionPlanRequest, MoveItErrorCodes
 from moveit_msgs.msg import ExecuteTrajectoryAction, ExecuteTrajectoryGoal
+
+from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest, GetPositionFKRequest, GetPositionFK
 
 from object_tracking.msg import InterceptMetrics
 from object_tracking.srv import StartTrial, StartTrialResponse
@@ -23,7 +26,13 @@ from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstrai
 from shape_msgs.msg import SolidPrimitive
 from sensor_msgs.msg import JointState
 
+def euclidean_dist(ee_position, goal):
 
+    d_sq = ((ee_position.x - goal.x)**2 +
+            (ee_position.x - goal.x)**2 +
+            (ee_position.x - goal.x)**2)
+
+    return math.sqrt(d_sq)
 
 
 def make_robot_state_from_joint_dict(joint_dict):
@@ -51,7 +60,7 @@ def panda_extended_open_start_state():
 
 
 def make_goal_constraints_from_pose(goal_pose_stamped: PoseStamped, ee_link: str,
-                                    pos_tol=0.02, ang_tol=0.35):
+                                    pos_tol=1.0, ang_tol=0.35):
     c = Constraints()
 
     pc = PositionConstraint()
@@ -80,6 +89,51 @@ def make_goal_constraints_from_pose(goal_pose_stamped: PoseStamped, ee_link: str
     return c
 
 
+def make_position_only_constraints(goal: PoseStamped, link_name: str, pos_tol: float = 0.02) -> Constraints:
+    c = Constraints()
+    c.name = "pos_only_goal"
+
+    pc = PositionConstraint()
+    pc.header = goal.header
+    pc.link_name = link_name
+    pc.weight = 1.0
+
+    box = SolidPrimitive()
+    box.type = SolidPrimitive.BOX
+    box.dimensions = [pos_tol, pos_tol, pos_tol]  # a small box
+
+    pc.constraint_region.primitives.append(box)
+    pc.constraint_region.primitive_poses.append(goal.pose)
+
+    c.position_constraints.append(pc)
+    return c
+
+
+def get_end_translation(plan):
+    rospy.wait_for_service('compute_fk')
+    fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
+
+    last_point = plan.trajectory.joint_trajectory.points[-1]
+
+    # Build the RobotState message
+    robot_state = RobotState()
+    robot_state.joint_state.name = plan.trajectory.joint_trajectory.joint_names
+    robot_state.joint_state.position = last_point.positions
+
+    # Create the FK Request
+    request = GetPositionFKRequest()
+    request.fk_link_names = ["panda_hand"]
+    request.robot_state = robot_state
+
+    try:
+        response = fk_srv(request)
+        if response.error_code.val == 1:  # SUCCESS
+            translation = response.pose_stamped[0].pose.position
+            print(f"Final EE Position: x={translation.x}, y={translation.y}, z={translation.z}")
+            return translation
+    except rospy.ServiceException as e:
+        rospy.logerr("FK service call failed: %s" % e)
+
 class TrajectoryExecutorManager:
     """
     Service-driven trial runner:
@@ -105,14 +159,14 @@ class TrajectoryExecutorManager:
         self.exec_action = rospy.get_param("~execute_action", "/execute_trajectory")
 
         # Defaults (overridable per trial)
-        self.max_attempts_default = int(rospy.get_param("~max_attempts", 5))
+        self.max_attempts_default = int(rospy.get_param("~max_attempts", 10))
         self.eval_window_default = float(rospy.get_param("~eval_window_s", 5.0))
         self.eps_pos_default = float(rospy.get_param("~eps_pos", 0.3))
         self.eps_ang_default = float(rospy.get_param("~eps_ang", 3.14))
 
         # Planning params
         self.allowed_planning_time = float(rospy.get_param("~allowed_planning_time", 6.0))
-        self.num_planning_attempts = int(rospy.get_param("~num_planning_attempts", 3))
+        self.num_planning_attempts = int(rospy.get_param("~num_planning_attempts", 10))
         self.vel_scale = float(rospy.get_param("~vel_scale", 0.3))
         self.acc_scale = float(rospy.get_param("~acc_scale", 0.3))
 
@@ -195,19 +249,47 @@ class TrajectoryExecutorManager:
         mpr.max_velocity_scaling_factor = self.vel_scale
         mpr.max_acceleration_scaling_factor = self.acc_scale
         mpr.start_state = self.start_state
+        # mpr.goal_constraints = [make_position_only_constraints(goal, self.ee_link, pos_tol=1.0)]
         mpr.goal_constraints = [make_goal_constraints_from_pose(goal, self.ee_link,
                                                                 pos_tol=eps_pos,
                                                                 ang_tol=eps_ang)]
         return mpr
 
     def call_planner(self, service_name: str, mpr: MotionPlanRequest):
+
+        rospy.loginfo("Start call_planner")
         rospy.wait_for_service(service_name, timeout=30.0)
-        proxy = rospy.ServiceProxy(service_name, GetMotionPlan)
+        # proxy = rospy.ServiceProxy(service_name, GetMotionPlan)
+        proxy = rospy.ServiceProxy(
+            service_name,
+            GetMotionPlan,
+            persistent=True
+        )
+        rospy.loginfo("Received planning service proxy ")
         req = GetMotionPlanRequest()
         req.motion_plan_request = mpr
+        req.motion_plan_request.allowed_planning_time = 30.0
+        req.motion_plan_request.num_planning_attempts = 10
         t0 = time.time()
+
+        # t = threading.Thread(target=call_service)
+        # t.start()
+        # t.join(timeout=60)
+        #
+        # resp = MotionPlanRequest()
+        #
+        # if t.is_alive():
+        #     rospy.logerr("Planner service timeout")
+        # else:
+        #     resp = proxy(req).motion_plan_response
+
         resp = proxy(req).motion_plan_response
         dt = time.time() - t0
+        ee_position = get_end_translation(resp)
+        rospy.loginfo("Received planning service response %s, %s, %s", resp.group_name, resp.planning_time,
+                      resp.error_code.val)
+        rospy.loginfo("End Effector final position: [%s,%s,%s]", ee_position.x, ee_position.y, ee_position.z)
+
         return resp, dt
 
     def execute_trajectory(self, traj):
@@ -301,14 +383,20 @@ class TrajectoryExecutorManager:
             self.publish_status(f"PLANNING {self.active['trial_id']} attempt={self.active['attempt_idx']}")
             try:
                 plan_resp, plan_dt = self.call_planner(self.active["planner_service"], mpr)
+                goal = self.pick_goal_pose(self.last_odom)
+                ee_position = get_end_translation(plan_resp)
+                ed = euclidean_dist(ee_position=ee_position, goal=goal.pose.position)
+                rospy.loginfo("final ee to goal dist: %s", ed)
             except Exception as e:
                 rospy.logwarn("Planner call failed: %s", str(e))
                 self.active["attempt_idx"] += 1
                 if self.active["attempt_idx"] >= self.active["max_attempts"]:
-                    self._finish_trial(False, "planner_call_failed")
+                    self._finish_trial(False, "planner_call_failed max_attempts exceeded")
                 return
 
             self.active["planner_time_s"] = plan_dt
+
+            # plan_resp = None
 
             if plan_resp.error_code.val != MoveItErrorCodes.SUCCESS:
                 rospy.logwarn("Planning failed error_code=%d", plan_resp.error_code.val)
@@ -331,6 +419,11 @@ class TrajectoryExecutorManager:
 
         # Success condition (gated)
         if self.last_metrics is not None:
+
+            rospy.loginfo("Dist %s and ang %s passed to ok success condition check %s, %s"
+                          , self.last_metrics.distance_m, self.last_metrics.angle_rad
+                          , self.active["eps_pos"]
+                          , self.active["eps_ang"])
             d_ok = (self.last_metrics.distance_m <= self.active["eps_pos"])
             a_ok = (self.last_metrics.angle_rad <= self.active["eps_ang"])
             if d_ok and a_ok:
@@ -344,6 +437,7 @@ class TrajectoryExecutorManager:
 
             self.active["attempt_idx"] += 1
             if self.active["attempt_idx"] >= self.active["max_attempts"]:
+                rospy.loginfo("Time out window exceeded %s, %s ", self.active["attempt_idx"], self.active["max_attempts"])
                 self._finish_trial(False, "timeout_window")
                 return
 
@@ -464,6 +558,7 @@ class TrajectoryExecutorManager:
             if isinstance(v, int) and v == code:
                 return k
         return str(code)
+
 
 def main():
     rospy.init_node("trajectory_executor_manager")
