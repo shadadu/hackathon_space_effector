@@ -19,7 +19,7 @@ depth: 4
 Qp: 10.0
 Qp_terminal: 80.0
 
-device: mps
+device: cpu
 out_path: /root/catkin_ws/src/objecttracking/models/panda_dgm_v1.pth
 model_path: /root/catkin_ws/src/objecttracking/models/panda_dgm_v1.pth
 fk_service: /compute_fk
