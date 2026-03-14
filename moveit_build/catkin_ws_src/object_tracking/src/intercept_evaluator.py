@@ -6,6 +6,8 @@ import tf2_ros
 from geometry_msgs.msg import TransformStamped, Vector3
 from object_tracking.msg import InterceptMetrics
 
+# from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest, GetPositionFKRequest, GetPositionFK
+# from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstraint, RobotState
 
 def quat_conj(q):
     return (-q[0], -q[1], -q[2], q[3])
@@ -47,7 +49,7 @@ class InterceptEvaluator:
 
     def lookup(self, target, source):
         # target <- source
-        return self.tfbuf.lookup_transform(target, source, rospy.Time(0), self.tf_timeout)
+        return self.tfbuf.lookup_transform(target, source, rospy.Time(0), self.tf_timeout) # lookupTransform(target_frame, source_frame, time) -> (position, quaternion)
 
     def on_timer(self, _evt):
         try:
@@ -58,7 +60,6 @@ class InterceptEvaluator:
             rospy.loginfo("OBJ position= %s, %s, %s", Tw_o.transform.translation.x, Tw_o.transform.translation.y
                           , Tw_o.transform.translation.z)
 
-            # rospy.loginfo("Proximity metrics: world->end-effector=%s ; world->object=%s", str(Tw_e), str(Tw_o))
         except Exception as e:
             rospy.logwarn_throttle(2.0, "TF lookup failed: %s", str(e))
             return
