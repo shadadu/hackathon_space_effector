@@ -23,14 +23,15 @@ from object_tracking.srv import RunBenchmark, RunBenchmarkResponse
 
 from geometry_msgs.msg import PoseStamped, Vector3
 from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstraint, RobotState
+# from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest
 from shape_msgs.msg import SolidPrimitive
 from sensor_msgs.msg import JointState
 
 def euclidean_dist(ee_position, goal):
 
     d_sq = ((ee_position.x - goal.x)**2 +
-            (ee_position.x - goal.x)**2 +
-            (ee_position.x - goal.x)**2)
+            (ee_position.y - goal.y)**2 +
+            (ee_position.z - goal.z)**2)
 
     return math.sqrt(d_sq)
 
@@ -108,6 +109,31 @@ def make_position_only_constraints(goal: PoseStamped, link_name: str, pos_tol: f
     c.position_constraints.append(pc)
     return c
 
+def get_panda_start_pose(start_state):
+    rospy.wait_for_service('compute_fk')
+    fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
+
+    fk_request = GetPositionFKRequest()
+    # Specify the link you want the coordinates for
+    fk_request.fk_link_names = ["panda_hand"]
+    fk_request.header.frame_id = "panda_link0"  # Usually the base frame
+    fk_request.robot_state = start_state
+
+    try:
+        response = fk_srv(fk_request)
+        if response.error_code.val == 1:
+            pose = response.pose_stamped[0].pose
+
+            # Cartesian Coordinates
+            pos = pose.position
+            # Quaternion Coordinates
+            ori = pose.orientation
+
+            print(f"Start Position: x={pos.x}, y={pos.y}, z={pos.z}")
+            print(f"Start Orientation (Quat): x={ori.x}, y={ori.y}, z={ori.z}, w={ori.w}")
+            return pos
+    except rospy.ServiceException as e:
+        rospy.logerr("Service call failed: %s" % e)
 
 def get_end_translation(plan):
     rospy.wait_for_service('compute_fk')
@@ -249,6 +275,9 @@ class TrajectoryExecutorManager:
         mpr.max_velocity_scaling_factor = self.vel_scale
         mpr.max_acceleration_scaling_factor = self.acc_scale
         mpr.start_state = self.start_state
+        start_position =  self.start_state.joint_state.position
+        # start_dist = euclidean_dist(start_position, goal)
+        # rospy.loginfo("Start distance =%s", start_position)
         # mpr.goal_constraints = [make_position_only_constraints(goal, self.ee_link, pos_tol=1.0)]
         mpr.goal_constraints = [make_goal_constraints_from_pose(goal, self.ee_link,
                                                                 pos_tol=eps_pos,
@@ -285,7 +314,10 @@ class TrajectoryExecutorManager:
 
         resp = proxy(req).motion_plan_response
         dt = time.time() - t0
+        ee_position_st = get_panda_start_pose(start_state=self.start_state)
         ee_position = get_end_translation(resp)
+        start_dist = euclidean_dist(ee_position_st, ee_position)
+        rospy.loginfo("Start EE and goal distance = %s", start_dist)
         rospy.loginfo("Received planning service response %s, %s, %s", resp.group_name, resp.planning_time,
                       resp.error_code.val)
         rospy.loginfo("End Effector final position: [%s,%s,%s]", ee_position.x, ee_position.y, ee_position.z)
@@ -395,8 +427,6 @@ class TrajectoryExecutorManager:
                 return
 
             self.active["planner_time_s"] = plan_dt
-
-            # plan_resp = None
 
             if plan_resp.error_code.val != MoveItErrorCodes.SUCCESS:
                 rospy.logwarn("Planning failed error_code=%d", plan_resp.error_code.val)
