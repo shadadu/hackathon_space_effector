@@ -61,7 +61,7 @@ def panda_extended_open_start_state():
 
 
 def make_goal_constraints_from_pose(goal_pose_stamped: PoseStamped, ee_link: str,
-                                    pos_tol=1.0, ang_tol=0.35):
+                                    pos_tol=0.25, ang_tol=3.142):
     c = Constraints()
 
     pc = PositionConstraint()
@@ -202,7 +202,10 @@ class TrajectoryExecutorManager:
 
         # State
         self.last_odom = None
+
         self.last_metrics = None
+        self.distance_m = 1.0
+        self.angle_rad = 3.140
 
         self.start_state = panda_extended_open_start_state()
 
@@ -211,7 +214,7 @@ class TrajectoryExecutorManager:
 
         # Subscribers
         rospy.Subscriber(self.object_topic, Odometry, self.cb_object, queue_size=1)
-        rospy.Subscriber(self.metrics_topic, InterceptMetrics, self.cb_metrics, queue_size=50)
+        # rospy.Subscriber(self.metrics_topic, InterceptMetrics, self.cb_metrics, queue_size=50)
 
         # ExecuteTrajectoryAction
         self.exec_client = actionlib.SimpleActionClient(self.exec_action, ExecuteTrajectoryAction)
@@ -275,7 +278,7 @@ class TrajectoryExecutorManager:
         mpr.max_velocity_scaling_factor = self.vel_scale
         mpr.max_acceleration_scaling_factor = self.acc_scale
         mpr.start_state = self.start_state
-        start_position =  self.start_state.joint_state.position
+        start_position = self.start_state.joint_state.position
         # start_dist = euclidean_dist(start_position, goal)
         # rospy.loginfo("Start distance =%s", start_position)
         # mpr.goal_constraints = [make_position_only_constraints(goal, self.ee_link, pos_tol=1.0)]
@@ -398,8 +401,9 @@ class TrajectoryExecutorManager:
 
         # Update mins while active
         if self.last_metrics is not None:
-            self.active["min_dist"] = min(self.active["min_dist"], float(self.last_metrics.distance_m))
-            self.active["min_ang"] = min(self.active["min_ang"], float(self.last_metrics.angle_rad))
+            self.active["min_dist"] = min(self.active["min_dist"], float(self.distance_m))
+            self.active["min_ang"] = min(self.active["min_ang"], float(self.angle_rad))
+            self.last_metrics = True
 
         # If attempt not started yet, plan+execute
         if self.active["attempt_start_t"] is None:
@@ -418,7 +422,10 @@ class TrajectoryExecutorManager:
                 goal = self.pick_goal_pose(self.last_odom)
                 ee_position = get_end_translation(plan_resp)
                 ed = euclidean_dist(ee_position=ee_position, goal=goal.pose.position)
-                rospy.loginfo("final ee to goal dist: %s", ed)
+                self.distance_m = ed
+                self.last_metrics = True
+                # to-do: update ang also
+                rospy.loginfo("final ee to goal dist: %s, %s", ed, self.distance_m)
             except Exception as e:
                 rospy.logwarn("Planner call failed: %s", str(e))
                 self.active["attempt_idx"] += 1
@@ -451,11 +458,14 @@ class TrajectoryExecutorManager:
         if self.last_metrics is not None:
 
             rospy.loginfo("Dist %s and ang %s passed to ok success condition check %s, %s"
-                          , self.last_metrics.distance_m, self.last_metrics.angle_rad
+                          , self.distance_m, self.angle_rad
                           , self.active["eps_pos"]
                           , self.active["eps_ang"])
-            d_ok = (self.last_metrics.distance_m <= self.active["eps_pos"])
-            a_ok = (self.last_metrics.angle_rad <= self.active["eps_ang"])
+            # d_ok = (self.last_metrics.distance_m <= self.active["eps_pos"])
+            # a_ok = (self.last_metrics.angle_rad <= self.active["eps_ang"])
+
+            d_ok = (self.distance_m <= self.active["eps_pos"])
+            a_ok = (self.angle_rad <= self.active["eps_ang"])
             if d_ok and a_ok:
                 self._finish_trial(True, "within_tolerance")
                 return
