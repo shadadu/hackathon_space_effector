@@ -27,6 +27,8 @@ from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstrai
 from shape_msgs.msg import SolidPrimitive
 from sensor_msgs.msg import JointState
 
+from intercept_evaluator import quatern, quatern_conj, quat_angle, quat_conj, quat_mul
+
 def euclidean_dist(ee_position, goal):
 
     d_sq = ((ee_position.x - goal.x)**2 +
@@ -155,8 +157,9 @@ def get_end_translation(plan):
         response = fk_srv(request)
         if response.error_code.val == 1:  # SUCCESS
             translation = response.pose_stamped[0].pose.position
+            orientation = response.pose_stamped[0].pose.orientation
             print(f"Final EE Position: x={translation.x}, y={translation.y}, z={translation.z}")
-            return translation
+            return translation, orientation
     except rospy.ServiceException as e:
         rospy.logerr("FK service call failed: %s" % e)
 
@@ -318,7 +321,7 @@ class TrajectoryExecutorManager:
         resp = proxy(req).motion_plan_response
         dt = time.time() - t0
         ee_position_st = get_panda_start_pose(start_state=self.start_state)
-        ee_position = get_end_translation(resp)
+        ee_position, ee_orientation = get_end_translation(resp)
         start_dist = euclidean_dist(ee_position_st, ee_position)
         rospy.loginfo("Start EE and goal distance = %s", start_dist)
         rospy.loginfo("Received planning service response %s, %s, %s", resp.group_name, resp.planning_time,
@@ -420,12 +423,17 @@ class TrajectoryExecutorManager:
             try:
                 plan_resp, plan_dt = self.call_planner(self.active["planner_service"], mpr)
                 goal = self.pick_goal_pose(self.last_odom)
-                ee_position = get_end_translation(plan_resp)
+                ee_position, ee_orientation = get_end_translation(plan_resp)
                 ed = euclidean_dist(ee_position=ee_position, goal=goal.pose.position)
+                rospy.loginfo("ee orientation =%s",ee_orientation.w)
+                # ang_ = quatern_angle(ee_orientation)
+                qerr = quat_mul(quatern_conj(ee_orientation), quatern(goal.pose.orientation))
+                ang_delta = quat_angle(qerr)
+                rospy.loginfo("ee orientation ang_ =%s", ang_delta)
                 self.distance_m = ed
                 self.last_metrics = True
                 # to-do: update ang also
-                rospy.loginfo("final ee to goal dist: %s, %s", ed, self.distance_m)
+                rospy.loginfo("final ee to goal dist, angle: %s, %s", ed, self.distance_m)
             except Exception as e:
                 rospy.logwarn("Planner call failed: %s", str(e))
                 self.active["attempt_idx"] += 1
