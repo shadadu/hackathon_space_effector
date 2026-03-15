@@ -12,6 +12,12 @@ from object_tracking.msg import InterceptMetrics
 def quat_conj(q):
     return (-q[0], -q[1], -q[2], q[3])
 
+def quatern_conj(q):
+    return -q.x, -q.y, -q.z, q.w
+
+def quatern(q):
+    return q.x, q.y, q.z, q.w
+
 
 def quat_mul(a, b):
     ax, ay, az, aw = a
@@ -28,6 +34,11 @@ def quat_angle(q):
     # assumes q normalized; returns rotation angle in [0,pi]
     w = max(-1.0, min(1.0, q[3]))
     return 2.0 * math.acos(abs(w))
+
+def quatern_angle(q):
+    # assumes q normalized; returns rotation angle in [0,pi]
+    u = max(-1.0, min(1.0, q.w))
+    return 2.0 * math.acos(abs(u))
 
 
 class InterceptEvaluator:
