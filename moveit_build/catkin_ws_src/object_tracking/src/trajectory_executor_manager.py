@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 import time
 import uuid
-import threading
 import math
 import rospy
 import actionlib
 from actionlib_msgs.msg import GoalStatus
 import threading
+import math
 
 from nav_msgs.msg import Odometry
 from std_msgs.msg import String
@@ -17,17 +17,15 @@ from moveit_msgs.msg import ExecuteTrajectoryAction, ExecuteTrajectoryGoal
 
 from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest, GetPositionFKRequest, GetPositionFK
 
-from object_tracking.msg import InterceptMetrics
 from object_tracking.srv import StartTrial, StartTrialResponse
 from object_tracking.srv import RunBenchmark, RunBenchmarkResponse
 
 from geometry_msgs.msg import PoseStamped, Vector3
 from moveit_msgs.msg import Constraints, PositionConstraint, OrientationConstraint, RobotState
-# from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest
 from shape_msgs.msg import SolidPrimitive
 from sensor_msgs.msg import JointState
 
-from intercept_evaluator import quatern, quatern_conj, quat_angle, quat_conj, quat_mul
+from intercept_evaluator import quatern, quatern_conj, quat_angle, quat_mul
 
 def euclidean_dist(ee_position, goal):
 
@@ -191,7 +189,7 @@ class TrajectoryExecutorManager:
         self.max_attempts_default = int(rospy.get_param("~max_attempts", 10))
         self.eval_window_default = float(rospy.get_param("~eval_window_s", 5.0))
         self.eps_pos_default = float(rospy.get_param("~eps_pos", 0.3))
-        self.eps_ang_default = float(rospy.get_param("~eps_ang", 3.14))
+        self.eps_ang_default = float(rospy.get_param("~eps_ang", math.pi/2))
 
         # Planning params
         self.allowed_planning_time = float(rospy.get_param("~allowed_planning_time", 6.0))
@@ -245,9 +243,6 @@ class TrajectoryExecutorManager:
     # ----------------- Callbacks -----------------
     def cb_object(self, msg: Odometry):
         self.last_odom = msg
-
-    def cb_metrics(self, msg: InterceptMetrics):
-        self.last_metrics = msg
 
     def publish_status(self, s: str):
         self.status_pub.publish(String(data=s))
@@ -426,14 +421,13 @@ class TrajectoryExecutorManager:
                 ee_position, ee_orientation = get_end_translation(plan_resp)
                 ed = euclidean_dist(ee_position=ee_position, goal=goal.pose.position)
                 rospy.loginfo("ee orientation =%s",ee_orientation.w)
-                # ang_ = quatern_angle(ee_orientation)
                 qerr = quat_mul(quatern_conj(ee_orientation), quatern(goal.pose.orientation))
                 ang_delta = quat_angle(qerr)
                 rospy.loginfo("ee orientation ang_ =%s", ang_delta)
                 self.distance_m = ed
+                self.angle_rad = ang_delta
                 self.last_metrics = True
-                # to-do: update ang also
-                rospy.loginfo("final ee to goal dist, angle: %s, %s", ed, self.distance_m)
+                rospy.loginfo("final ee to goal dist, angle: %s, %s", self.distance_m, self.angle_rad)
             except Exception as e:
                 rospy.logwarn("Planner call failed: %s", str(e))
                 self.active["attempt_idx"] += 1
