@@ -12,7 +12,6 @@ from object_tracking.hjb_loss import hjb_residual_loss, terminal_loss
 from object_tracking.fk_client import FKClient
 
 
-
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
     jmax = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973], dtype=np.float64)
@@ -85,9 +84,9 @@ def main():
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
-
         V = model(build_input(q, t, g))
-        loss_pde = hjb_residual_loss(V, q, t, l, R_inv_diag) # hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag)
+        loss_pde = hjb_residual_loss(V, q, t, l,
+                                     R_inv_diag)  # hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag)
 
         # terminal batch
         bt = max(64, batch // 3)

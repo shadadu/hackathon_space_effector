@@ -46,7 +46,7 @@ def make_robot_state_from_joint_dict(joint_dict):
 
 
 def panda_extended_open_start_state():
-    joints = {
+    joints_state_A = {
         "panda_joint1": 0.0,
         "panda_joint2": 0.0,
         "panda_joint3": 0.0,
@@ -57,7 +57,18 @@ def panda_extended_open_start_state():
         "panda_finger_joint1": 0.035,
         "panda_finger_joint2": 0.035,
     }
-    return make_robot_state_from_joint_dict(joints)
+    joints_state_B = {
+        "panda_joint1": 0.0,
+        "panda_joint2": -0.785,
+        "panda_joint3": 0.0,
+        "panda_joint4": -2.356,
+        "panda_joint5": 0.0,
+        "panda_joint6": 1.571,
+        "panda_joint7": 0.785,
+        "panda_finger_joint1": 0.035,
+        "panda_finger_joint2": 0.035,
+    }
+    return make_robot_state_from_joint_dict(joints_state_B)
 
 
 def make_goal_constraints_from_pose(goal_pose_stamped: PoseStamped, ee_link: str,
@@ -237,7 +248,8 @@ class TrajectoryExecutorManager:
 
         # Timer just watches + handles state machine
         self.timer = rospy.Timer(rospy.Duration(1.0 / self.loop_hz), self.on_timer)
-
+        ee_pos = get_panda_start_pose(start_state=self.start_state)
+        rospy.loginfo("TrajectoryExecutorManager init end-effector pos = %s", ee_pos)
         rospy.loginfo("TrajectoryExecutorManager ready: /start_trial and /run_benchmark available.")
 
     # ----------------- Callbacks -----------------
@@ -278,7 +290,8 @@ class TrajectoryExecutorManager:
         mpr.start_state = self.start_state
         start_position = self.start_state.joint_state.position
         # start_dist = euclidean_dist(start_position, goal)
-        # rospy.loginfo("Start distance =%s", start_position)
+        start_position_coords = get_panda_start_pose(start_state=mpr.start_state)
+        rospy.loginfo("Start position =%s", start_position)
         # mpr.goal_constraints = [make_position_only_constraints(goal, self.ee_link, pos_tol=1.0)]
         mpr.goal_constraints = [make_goal_constraints_from_pose(goal, self.ee_link,
                                                                 pos_tol=eps_pos,
@@ -318,7 +331,10 @@ class TrajectoryExecutorManager:
         ee_position_st = get_panda_start_pose(start_state=self.start_state)
         ee_position, ee_orientation = get_end_translation(resp)
         start_dist = euclidean_dist(ee_position_st, ee_position)
-        rospy.loginfo("Start EE and goal distance = %s", start_dist)
+        rospy.loginfo("Start EE and goal distance = %s, start ee_pos = %s, end ee_pos = %s "
+                      , start_dist
+                      , ee_position_st
+                      , ee_position)
         rospy.loginfo("Received planning service response %s, %s, %s", resp.group_name, resp.planning_time,
                       resp.error_code.val)
         rospy.loginfo("End Effector final position: [%s,%s,%s]", ee_position.x, ee_position.y, ee_position.z)
@@ -396,6 +412,9 @@ class TrajectoryExecutorManager:
         """
         if self.active is None:
             return
+
+        ee_pos = get_panda_start_pose(start_state=self.start_state)
+        rospy.loginfo("TrajectoryExecutorManager @ _attemp_step end-effector pos = %s", ee_pos)
 
         # Update mins while active
         if self.last_metrics is not None:

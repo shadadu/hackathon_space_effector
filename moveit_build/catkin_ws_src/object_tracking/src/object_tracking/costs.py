@@ -1,7 +1,7 @@
 """
 costs.py
 
-Cost terms for your DGM / HJB formulation.
+Cost terms for DGM / HJB formulation.
 
 These terms should be usable both:
 - during training (loss composition)
