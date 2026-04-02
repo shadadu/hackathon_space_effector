@@ -299,7 +299,7 @@ class DGMPlannerService:
         self.srv = rospy.Service(self.service_name, GetMotionPlan, self.handle)
         rospy.loginfo("DGM planner service up: %s (IK: %s, init_ok=%s)",
                       self.service_name, self.ik_service, str(init_ok))
-        
+
     def move_ee_to_xyz(self, x, y, z, quat=None, use_current_orientation=True):
         """
         Physically move the Panda end effector to (x,y,z) using MoveIt.

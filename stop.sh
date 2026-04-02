@@ -32,4 +32,7 @@ else
   ok "Network not present: $NET_NAME"
 fi
 
+log "Freeing memory space/volumes"
+docker system prune --volumes --force
+
 ok "Teardown complete."
