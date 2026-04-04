@@ -16,12 +16,12 @@ ChaptGPT 5.2
 # Running the services
 The stack provides a simulation platform for researching and testing micro-gravity environment Optimal Control and Deep Learning based trajectory planners and executors.
 To start:
-1. In the project root dir, run ./start.sh to boot up the docker containers: 
+1. In the project root dir, run ./bring_up.sh to boot up the docker containers: 
     rosnet(bridge network), ros_master, astrobee_grasp, moveit
     start.sh brings up the stack and runs tests on the environment, and test that
     the servers can communicate via ROS and send and receive messages. 
     It also runs diagnostic tests of the pose, intercept, and trajectory planners. 
-2. Run ./stop.sh to stop the services and tear down the stack
+2. Run ./stop.sh to stop the services and tear down the stack and free any memory/volumes
 
 # Training DGM
 1. rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=300 _batch:=192

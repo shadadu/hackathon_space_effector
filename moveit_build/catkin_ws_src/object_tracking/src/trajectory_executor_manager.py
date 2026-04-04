@@ -151,6 +151,7 @@ def get_end_translation(plan):
     fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
 
     last_point = plan.trajectory.joint_trajectory.points[-1]
+    rospy.loginfo("Joint state last_point = %s", last_point)
 
     # Build the RobotState message
     robot_state = RobotState()

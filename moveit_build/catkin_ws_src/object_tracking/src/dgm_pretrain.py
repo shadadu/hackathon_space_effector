@@ -25,6 +25,20 @@ def sample_goals(n):
     return np.hstack([xs, ys, zs]).astype(np.float64)
 
 
+def position_loss_fn(fk, joint_names, batch, Qp, g_np, q_np):
+    l_np = np.zeros((batch,), dtype=np.float64)
+    for i in range(batch):
+        try:
+            p = fk.ee_position(joint_names, q_np[i])
+            e = p - g_np[i]
+            l_np[i] = Qp * float(np.dot(e, e))
+        except Exception:
+            rospy.logwarn("fk_pos: couldn't retrieve fk position")
+            l_np[i] = 1e3
+    rospy.loginfo("Loss vector %s", l_np)
+    return l_np
+
+
 def main():
     rospy.init_node("dgm_pretrain")
 
@@ -54,6 +68,7 @@ def main():
     if len(joint_names) != 7:
         raise RuntimeError(f"Expected 7 joints, got {len(joint_names)}: {joint_names}")
 
+    # client to retrieve position of end effector to compute running loss function term
     fk = FKClient(service="/compute_fk", ee_link="panda_hand", frame="world")
 
     jmin, jmax = panda_joint_limits()
@@ -70,14 +85,16 @@ def main():
         g_np = sample_goals(batch)
 
         # running cost via FK (position-only)
-        l_np = np.zeros((batch,), dtype=np.float64)
-        for i in range(batch):
-            try:
-                p = fk.ee_position(joint_names, q_np[i])
-                e = p - g_np[i]
-                l_np[i] = Qp * float(np.dot(e, e))
-            except Exception:
-                l_np[i] = 1e3
+        l_np = position_loss_fn(fk, joint_names, batch, Qp, g_np, q_np)
+        # l_np = np.zeros((batch,), dtype=np.float64)
+        # for i in range(batch):
+        #     try:
+        #         p = fk.ee_position(joint_names, q_np[i])
+        #         e = p - g_np[i]
+        #         l_np[i] = Qp * float(np.dot(e, e))
+        #     except Exception:
+        #         rospy.logwarn("l_np: couldn't retrieve fk position")
+        #         l_np[i] = 1e3
 
         q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
         t = torch.tensor((t_np / T), dtype=torch.float32, device=device, requires_grad=True)
@@ -93,14 +110,17 @@ def main():
         qT_np = np.random.uniform(jmin, jmax, (bt, 7)).astype(np.float64)
         gT_np = sample_goals(bt)
 
-        phi_np = np.zeros((bt,), dtype=np.float64)
-        for i in range(bt):
-            try:
-                p = fk.ee_position(joint_names, qT_np[i])
-                e = p - gT_np[i]
-                phi_np[i] = QpT * float(np.dot(e, e))
-            except Exception:
-                phi_np[i] = 1e3
+        phi_np = position_loss_fn(fk, joint_names, bt, QpT, gT_np, qT_np)
+
+        # phi_np = np.zeros((bt,), dtype=np.float64)
+        # for i in range(bt):
+        #     try:
+        #         p = fk.ee_position(joint_names, qT_np[i])
+        #         e = p - gT_np[i]
+        #         phi_np[i] = QpT * float(np.dot(e, e))
+        #     except Exception:
+        #         rospy.logwarn("phi_np: couldn't retrieve fk position")
+        #         phi_np[i] = 1e3
 
         qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
         tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)  # normalized t=1

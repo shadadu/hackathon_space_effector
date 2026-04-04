@@ -11,7 +11,9 @@ from geometry_msgs.msg import Point
 from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest
 from moveit_commander import RobotCommander, MoveGroupCommander
 
-from .dgm_model import DGMValueNet, build_input
+from object_tracking.dgm_model import DGMValueNet, build_input, save_checkpoint
+from object_tracking.hjb_loss import hjb_residual_loss, terminal_loss
+from object_tracking.fk_client import FKClient
 
 
 def panda_joint_limits() -> Tuple[np.ndarray, np.ndarray]:

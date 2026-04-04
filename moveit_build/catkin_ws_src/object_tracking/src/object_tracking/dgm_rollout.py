@@ -143,10 +143,13 @@ def rollout_dgm_joint_policy(
 
         pt.velocities = u.tolist()
         traj.joint_trajectory.points.append(pt)
+        rospy.loginfo("pt updated: %s", pt)
 
         # integrate forward (except after last point)
         if k < N - 1:
             q = q + cfg.dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
+
+    rospy.loginfo("traj last point = %s", traj.joint_trajectory.points[-1])
 
     return traj, q_hist
