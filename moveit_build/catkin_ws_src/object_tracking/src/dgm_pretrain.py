@@ -19,6 +19,8 @@ def panda_joint_limits():
 
 
 def sample_goals(n):
+    # Sample from xyz boundaries (cuboid) from which
+    # to train the NN to generate plans to reach points inside this goals cuboid/region
     xs = np.random.uniform(0.25, 0.65, (n, 1))
     ys = np.random.uniform(-0.30, 0.30, (n, 1))
     zs = np.random.uniform(0.10, 0.60, (n, 1))
@@ -35,7 +37,7 @@ def position_loss_fn(fk, joint_names, batch, Qp, g_np, q_np):
         except Exception:
             rospy.logwarn("fk_pos: couldn't retrieve fk position")
             l_np[i] = 1e3
-    rospy.loginfo("Loss vector %s", l_np)
+    # rospy.loginfo("Loss vector %s", l_np)
     return l_np
 
 
@@ -86,15 +88,6 @@ def main():
 
         # running cost via FK (position-only)
         l_np = position_loss_fn(fk, joint_names, batch, Qp, g_np, q_np)
-        # l_np = np.zeros((batch,), dtype=np.float64)
-        # for i in range(batch):
-        #     try:
-        #         p = fk.ee_position(joint_names, q_np[i])
-        #         e = p - g_np[i]
-        #         l_np[i] = Qp * float(np.dot(e, e))
-        #     except Exception:
-        #         rospy.logwarn("l_np: couldn't retrieve fk position")
-        #         l_np[i] = 1e3
 
         q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
         t = torch.tensor((t_np / T), dtype=torch.float32, device=device, requires_grad=True)
@@ -111,16 +104,6 @@ def main():
         gT_np = sample_goals(bt)
 
         phi_np = position_loss_fn(fk, joint_names, bt, QpT, gT_np, qT_np)
-
-        # phi_np = np.zeros((bt,), dtype=np.float64)
-        # for i in range(bt):
-        #     try:
-        #         p = fk.ee_position(joint_names, qT_np[i])
-        #         e = p - gT_np[i]
-        #         phi_np[i] = QpT * float(np.dot(e, e))
-        #     except Exception:
-        #         rospy.logwarn("phi_np: couldn't retrieve fk position")
-        #         phi_np[i] = 1e3
 
         qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
         tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)  # normalized t=1

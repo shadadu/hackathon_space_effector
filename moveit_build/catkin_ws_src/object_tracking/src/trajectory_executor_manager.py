@@ -289,14 +289,11 @@ class TrajectoryExecutorManager:
         mpr.max_velocity_scaling_factor = self.vel_scale
         mpr.max_acceleration_scaling_factor = self.acc_scale
         mpr.start_state = self.start_state
-        start_position = self.start_state.joint_state.position
-        # start_dist = euclidean_dist(start_position, goal)
-        start_position_coords = get_panda_start_pose(start_state=mpr.start_state)
-        rospy.loginfo("Start position =%s", start_position)
-        # mpr.goal_constraints = [make_position_only_constraints(goal, self.ee_link, pos_tol=1.0)]
-        mpr.goal_constraints = [make_goal_constraints_from_pose(goal, self.ee_link,
-                                                                pos_tol=eps_pos,
-                                                                ang_tol=eps_ang)]
+        # rospy.loginfo("Start position =%s and distance from goal =%s", start_position)
+        mpr.goal_constraints = [make_position_only_constraints(goal, self.ee_link, pos_tol=1.0)]
+        # mpr.goal_constraints = [make_goal_constraints_from_pose(goal, self.ee_link,
+        #                                                         pos_tol=eps_pos,
+        #                                                         ang_tol=eps_ang)]
         return mpr
 
     def call_planner(self, service_name: str, mpr: MotionPlanRequest):

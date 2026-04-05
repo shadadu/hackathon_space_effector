@@ -137,9 +137,8 @@ def rollout_dgm_joint_policy(
             u = -0.5 * R_inv * grad_q_np
 
         # clamp velocities
-
         u = clamp(u, -cfg.vel_limits, cfg.vel_limits)
-        rospy.loginfo("Clamped velocities u = %s", u)
+        rospy.loginfo("Clamped velocities u = \%s", u)
 
         pt.velocities = u.tolist()
         traj.joint_trajectory.points.append(pt)

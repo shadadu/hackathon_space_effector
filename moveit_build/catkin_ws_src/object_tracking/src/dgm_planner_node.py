@@ -285,20 +285,13 @@ class DGMPlannerService:
             self.jac = rospy.ServiceProxy(self.jacobian_service, GetJacobian)
             rospy.loginfo("Jacobian hook enabled: %s", self.jacobian_service)
 
-        # Optional physical initialization of Panda before serving plans
-        # init_ok = self.opt_initialize_robot_pose()
-        init_ee_coords = get_ee_translation()
-        rospy.loginfo("DGM startup EE coordinates before init attempt = %s", init_ee_coords)
-
-        init_ok = self.move_to_ready_joint_pose()
-
         # Report actual startup EE coordinates after initialization attempt
         ee_coords = get_ee_translation()
         rospy.loginfo("DGM startup EE coordinates = %s", ee_coords)
 
         self.srv = rospy.Service(self.service_name, GetMotionPlan, self.handle)
-        rospy.loginfo("DGM planner service up: %s (IK: %s, init_ok=%s)",
-                      self.service_name, self.ik_service, str(init_ok))
+        rospy.loginfo("DGM planner service up: %s (IK: %s)",
+                      self.service_name, self.ik_service)
 
     def move_ee_to_xyz(self, x, y, z, quat=None, use_current_orientation=True):
         """
