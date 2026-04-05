@@ -8,10 +8,11 @@ Stack:
 
 # Platform
 Currently development is on a Apple Silicon with Docker containerization for our research and benchmarking. Better performance (and possibly less boilerplate) would be achieved with Linux
-Ubuntu since Astrobee and MoveIt are all Ubuntu-native. 
+Ubuntu since Ros and MoveIt are not fully supported on Mac, but fully-supported on Ubuntu. After benchmarking, the goal 
+would be a migration to an Ubuntu VM.
 
 # Coding Assistance
-ChaptGPT 5.2
+ChaptGPT 5.2+
 
 # Running the services
 The stack provides a simulation platform for researching and testing micro-gravity environment Optimal Control and Deep Learning based trajectory planners and executors.
@@ -32,8 +33,17 @@ To start:
     or a neural network prediction.
 3. Improve intercept planning/metrics from proximity to contact and grasping.
 
+# Perfomance Update
+Currently MoveIt's internal motion planners, OOMPL, are able to reach within 0.15cm of the end-effetor goal, while the basic
+implementation of DGM comes within 0.3-0.35cm of end-effector goal. DGM currently uses a small network, and only the residual loss.
+Constraints such as joint velocity limits, valid states, are enforced during data generation at training time. Because the residual 
+only reduces to about 20% of its value before plateauing, it is likely that HJB formulation is leaving out significant robotic
+behavior. The direction of improvement going forward is to improve the loss functions and the Initial and Boundary conditions, and 
+constraints to better coverage. Physics Informed Neural Network (PINN) formulations usually include constraint, IC and BC and residual
+losses in the total loss function, so that is direction to explore.
+
 # Architecture
-There are mainly two(2) docker containers (astrobee and moveit) that communicate by a ros bridge container.
+There are mainly two(2) docker containers -- astrobee(emulator) and moveit that communicate by a ros bridge container.
 Object instantiation and Perception are handled in the astrobee container which uses NASA's astrobee project
 to provide a free flying object mimicking drift in microgravity. Astrobee container broadcasts object location and 
 attitude to its object/state node. Moveit container subscribes to the object state topics and uses that to
@@ -50,7 +60,7 @@ introduce these constraints as penalties in the DGM cost function and/or whether
 with the DGM trajectory rollouts. Though DGM (with minimal training) is currently generating valid trajectories just like OMPL, it's taking longer times and tries; 
 it could be improved upon with some of these validity checks baked in. 
  
-Online, a free-flying object instantiated by Astrobee provides the object location and pose to the Trajectory Executor Manager,
+Online, a free-flying object instantiated by Astrobee emulator provides the object location and pose to the Trajectory Executor Manager,
 scene planning, and intercept planning services in the moveit container. Both or either of OMPL and DGM planners are called 
 to generate trajectories for intercepting the object. Intercept metrics are then computed for benchmarking DGM. 
 
@@ -121,5 +131,7 @@ to generate trajectories for intercepting the object. Intercept metrics are then
                                       └─────────────────────────────────────┘  
 
 
-# References
-TBD.
+# References 
+1. A. Borovykh et al. (2022) Data-driven initialization of deep learning solvers for Hamilton-Jacobi-Bellman PDEs
+2. Sirignano, J. et al. (2018) DGM: A deep learning algorithm for solving partial differential equations
+3. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning
