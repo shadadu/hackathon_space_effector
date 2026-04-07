@@ -11,7 +11,10 @@ from object_tracking.dgm_model import DGMValueNet, build_input, save_checkpoint
 from object_tracking.hjb_loss import hjb_residual_loss, terminal_loss
 from object_tracking.fk_client import FKClient
 
-
+"""
+Reference 
+1. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning, pp 41-47
+"""
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
     jmax = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973], dtype=np.float64)
@@ -29,10 +32,12 @@ def sample_goals(n):
 
 def position_loss_fn(fk, joint_names, batch, Qp, g_np, q_np):
     l_np = np.zeros((batch,), dtype=np.float64)
+    rospy.loginfo("l shape: %s", l_np.shape)
     for i in range(batch):
         try:
-            p = fk.ee_position(joint_names, q_np[i])
-            e = p - g_np[i]
+            p = fk.ee_position(joint_names, q_np[i]) # fk client gets coordinate position of hand/end-effector
+            rospy.loginfo("p: %s", p)
+            e = p - g_np[i] # distance between current joint position i and goal position i
             l_np[i] = Qp * float(np.dot(e, e))
         except Exception:
             rospy.logwarn("fk_pos: couldn't retrieve fk position")
@@ -70,7 +75,7 @@ def main():
     if len(joint_names) != 7:
         raise RuntimeError(f"Expected 7 joints, got {len(joint_names)}: {joint_names}")
 
-    # client to retrieve position of end effector to compute running loss function term
+    # client for retrieving position of end effector to compute running loss function term
     fk = FKClient(service="/compute_fk", ee_link="panda_hand", frame="world")
 
     jmin, jmax = panda_joint_limits()
