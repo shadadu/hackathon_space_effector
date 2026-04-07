@@ -8,8 +8,10 @@ Stack:
 
 # Platform
 Currently development is on a Apple Silicon with Docker containerization for our research and benchmarking. Better performance (and possibly less boilerplate) would be achieved with Linux
-Ubuntu since Ros and MoveIt are not fully supported on Mac, but fully-supported on Ubuntu. After benchmarking, the goal 
-would be a migration to an Ubuntu VM.
+Ubuntu since Ros and MoveIt are not fully supported on Mac, but fully-supported on Ubuntu. RViz and Gazebo are unstable 
+in the MacOS environment, so for now, object location, robot arm locations, trajectory and time point rollouts, proximity thresholds are being used to 
+compute intercepts and success of trajectory planning. After the Deep Galerkin Method(DGM) NN training and inference pipelines
+have been benchmarked satisfactorily, we would migrate to an Ubuntu VM where visualizations are better supported.
 
 # Coding Assistance
 ChaptGPT 5.2+
@@ -35,12 +37,21 @@ To start:
 
 # Perfomance Update
 Currently MoveIt's internal motion planners, OOMPL, are able to reach within 0.15cm of the end-effetor goal, while the basic
-implementation of DGM comes within 0.3-0.35cm of end-effector goal. DGM currently uses a small network, and only the residual loss.
+implementation of DGM comes within 0.3-0.35cm of end-effector goal. DGM currently uses a small network, and only the Value function loss.
+The Value function V(q, g, t, T) is the Euclidean distance from goal g to the current location q at time t and time limit T. 
+Minimizing the value function in the subsequent time steps brings the end-effector closer to the end goal. Current solver
+uses the Riccati solution of the HJB formulation to compute the control velocities u*. A neural network (DGMValueNet) is trained on 
+data of end-effector goal locations sampled from a xyz boundary region and start and intermediate valid states sampled from the robot arm 
+collision free initial joint states. In essence, the Neural Net is trained to generate robot arm joint state trajectories 
+for given end-effector goal positions.
+
 Constraints such as joint velocity limits, valid states, are enforced during data generation at training time. Because the residual 
 only reduces to about 20% of its value before plateauing, it is likely that HJB formulation is leaving out significant robotic
 behavior. The direction of improvement going forward is to improve the loss functions and the Initial and Boundary conditions, and 
 constraints to better coverage. Physics Informed Neural Network (PINN) formulations usually include constraint, IC and BC and residual
 losses in the total loss function, so that is direction to explore.
+
+There a several improvements to the DGM solver (check references below) being considered to improve the performance and tune the implementation.
 
 # Architecture
 There are mainly two(2) docker containers -- astrobee(emulator) and moveit that communicate by a ros bridge container.
@@ -135,3 +146,4 @@ to generate trajectories for intercepting the object. Intercept metrics are then
 1. A. Borovykh et al. (2022) Data-driven initialization of deep learning solvers for Hamilton-Jacobi-Bellman PDEs
 2. Sirignano, J. et al. (2018) DGM: A deep learning algorithm for solving partial differential equations
 3. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning
+4. Detorakis, G. I (2024) Practical Aspects on Solving Differential Equations using Deep Learning: A primer
