@@ -265,7 +265,7 @@ start_dgm_service() {
         ok "DGM model created: $model_path"
         break
       fi
-      if (( $(date +%s) - start > 180 )); then
+      if (( $(date +%s) - start > 280 )); then
         ros_exec "$container" "tail -n 200 /root/start_logs/dgm_pretrain.log || true" || true
         fail "Timed out waiting for DGM model file"
       fi

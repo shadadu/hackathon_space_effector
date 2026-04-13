@@ -25,6 +25,7 @@ class DGMValueNet(nn.Module):
         return self.net(x).squeeze(-1)
 
 
+
 def build_input(q, t_norm, gpos):
     # q: (B,7), t_norm: (B,1), gpos: (B,3)
     return torch.cat([q, t_norm, gpos], dim=-1)

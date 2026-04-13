@@ -144,6 +144,8 @@ to generate trajectories for intercepting the object. Intercept metrics are then
 
 # References 
 1. A. Borovykh et al. (2022) Data-driven initialization of deep learning solvers for Hamilton-Jacobi-Bellman PDEs
-2. Sirignano, J. et al. (2018) DGM: A deep learning algorithm for solving partial differential equations
-3. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning
+2. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning
+3. Beard R. et al. (1997) Galerkin Approximations of the Generalized Hamilton-Jacobi-Bellman Equation
 4. Detorakis, G. I (2024) Practical Aspects on Solving Differential Equations using Deep Learning: A primer
+5. Sirignano, J. et al. (2018) DGM: A deep learning algorithm for solving partial differential equations
+
