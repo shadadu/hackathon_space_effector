@@ -278,6 +278,7 @@ def main_():
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
         V = model(build_input(q, t, g))
+        rospy.loginfo("Shape of residual loss inputs %s, %s, %s", V.shape, q.shape, t.shape)
 
         loss_pde = hjb_residual_loss_(
             V=V,
