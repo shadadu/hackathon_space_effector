@@ -12,6 +12,7 @@ class DGMLayer(nn.Module):
     def __init__(self, input_dim=1, hidden_size=50):
         super().__init__()
 
+        self.I_init = nn.Linear(input_dim, hidden_size)
         self.Z_wg = nn.Linear(hidden_size, hidden_size)
         self.Z_ug = nn.Linear(input_dim, hidden_size, bias=False)
 
@@ -28,9 +29,12 @@ class DGMLayer(nn.Module):
         self.sigma = nn.Tanh()
 
     def forward(self, x, s):
+        I = self.I_init(s)
+
         Z = self.sigma(self.Z_wg(s) + self.Z_ug(x))
         G = self.sigma(self.G_wz(s) + self.G_uz(x))
         R = self.sigma(self.R_wr(s) + self.R_ur(x))
+        print(f"s")
         H = self.sigma(self.H_wh(s * R) + self.H_uh(x))
         out = (1-G)*H + Z*s
         # out = torch.sub(1, G) * H + Z * s
