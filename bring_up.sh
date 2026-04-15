@@ -292,7 +292,7 @@ fi
       _ee_link:=panda_hand \
       _model_path:=$model_path"
 
-  wait_for_node "$container" "/$DGM_NODE_NAME" 30
+  wait_for_node "$container" "/$DGM_NODE_NAME" 60
 
   local dgm_svc
   dgm_svc="$(find_first_service "$container" 60 "$DGM_SERVICE_NAME")" || {
