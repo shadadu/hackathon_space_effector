@@ -36,11 +36,6 @@ def get_panda_joint_positions():
 
     except rospy.ServiceException as e:
         print("Service call failed: %s" % e)
-#
-#
-# if __name__ == "__main__":
-#     rospy.init_node('get_panda_joints_client')
-#     get_panda_joint_positions()
 
 
 class FKClient:
