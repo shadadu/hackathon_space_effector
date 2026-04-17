@@ -7,15 +7,16 @@ import torch
 import torch.optim as optim
 
 from moveit_commander import MoveGroupCommander
-from object_tracking.dgm_model import DGMValueNet, build_input, save_checkpoint
+from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_, build_input, save_checkpoint
 from object_tracking.hjb_loss import hjb_residual_loss, hjb_residual_loss_, terminal_loss
 from object_tracking.fk_client import FKClient
-
 
 """
 Reference 
 1. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning, pp 41-47
 """
+
+
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
     jmax = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973], dtype=np.float64)
@@ -36,16 +37,15 @@ def position_loss_fn(fk, joint_names, batch, Qp, g_np, q_np):
     # rospy.loginfo("l shape: %s", l_np.shape)
     for i in range(batch):
         try:
-            p = fk.ee_position(joint_names, q_np[i]) # fk client gets coordinate position of hand/end-effector
+            p = fk.ee_position(joint_names, q_np[i])  # fk client gets coordinate position of hand/end-effector
             rospy.loginfo("p: %s", p)
-            e = p - g_np[i] # distance between current joint position i and goal position i
+            e = p - g_np[i]  # distance between current joint position i and goal position i
             l_np[i] = Qp * float(np.dot(e, e))
         except Exception:
             rospy.logwarn("fk_pos: couldn't retrieve fk position")
             l_np[i] = 1e3
     # rospy.loginfo("Loss vector %s", l_np)
     return l_np
-
 
 
 def dist_term(value, min_limit, max_limit):
@@ -75,6 +75,7 @@ def batch_joint_limit_penalty(q_batch, jmin, jmax, eps=1e-6):
     for i in range(q_batch.shape[0]):
         out[i] = joint_limit_penalty(q_batch[i], jmin, jmax, eps=eps)
     return out
+
 
 def main():
     rospy.init_node("dgm_pretrain")
@@ -188,6 +189,7 @@ def main():
     # # rospy.loginfo("Saved: %s", out_path)
     rospy.loginfo("DONE. Saved final: %s", out_path)
 
+
 def main_():
     rospy.init_node("dgm_pretrain")
 
@@ -197,12 +199,11 @@ def main_():
     device = rospy.get_param("~device", "cpu")
     T = float(rospy.get_param("~T", 2.0))
 
-    epochs = int(rospy.get_param("~epochs", 10))
     iters = int(rospy.get_param("~iters", 3000))
     batch = int(rospy.get_param("~batch", 192))
-    lr = float(rospy.get_param("~lr", 3e-4))
+    lr = float(rospy.get_param("~lr", 3e-5))
     hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 8))
+    depth = int(rospy.get_param("~depth", 4))
 
     print(f"device: {device}")
 
@@ -210,17 +211,17 @@ def main_():
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
     # New weights for limit penalties
-    Cj = float(rospy.get_param("~Cj", 0.01))   # joint position limit penalty weight
-    Cv = float(rospy.get_param("~Cv", 0.01))   # joint velocity limit penalty weight
+    Cj = float(rospy.get_param("~Cj", 0.01))  # joint position limit penalty weight
+    Cv = float(rospy.get_param("~Cv", 0.001))  # joint velocity limit penalty weight
+    Ctr = float(rospy.get_param("~Ctr", 100.0))  # joint velocity limit penalty weight
+    Cpd = float(rospy.get_param("~Ctr", 0.05))
 
     # State/control weighting
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
 
-    # Keep full diagonal inverse, not scalar max-based inverse
     R_inv_diag = 1.0 / R_diag
 
-    # Velocity limits; set these to your robot's actual limits
     vel_limits_np = np.array(
         rospy.get_param("~vel_limits", [2.0] * 7),
         dtype=np.float64
@@ -240,11 +241,19 @@ def main_():
     fk = FKClient(service="/compute_fk", ee_link="panda_hand", frame="world")
     jmin, jmax = panda_joint_limits()
 
-    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    model = ValueNet(num_layers=8, input_dim=11, output_dim=1, hidden_size=192)
+    # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1)
+
     opt = optim.Adam(model.parameters(), lr=lr)
 
     t0 = time.time()
     loss = torch.tensor(0.0, device=device)
+
+    t_loss = 0.0
+    t_loss_pde = 0.0
+    t_loss_term = 0.0
+    itr = 10
 
     for it in range(1, iters + 1):
         q_np = np.random.uniform(jmin, jmax, (batch, 7)).astype(np.float64)
@@ -262,7 +271,6 @@ def main_():
                 rospy.logwarn("fk_pos l: couldn't retrieve fk position")
                 pos_cost_np[i] = 1e3
 
-        # New: joint position limit penalty
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
 
         # Running cost includes:
@@ -277,8 +285,12 @@ def main_():
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
-        V = model(build_input(q, t, g))
-        rospy.loginfo("Shape of residual loss inputs %s, %s, %s", V.shape, q.shape, t.shape)
+        # V = model(build_input(q, t, g))
+        V = model(build_input(q, t, g), build_input(q, t, g))
+        # rospy.loginfo("Shape of residual loss inputs %s, %s, %s", V.shape, q.shape, t.shape)
+
+        # loss_pde = hjb_residual_loss(V, q, t, l,
+        #                              R_inv_diag)  # hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag)
 
         loss_pde = hjb_residual_loss_(
             V=V,
@@ -310,25 +322,31 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        VT = model(build_input(qT, tT, gT))
+        VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
         loss_term = terminal_loss(VT, phi)
 
-        loss = loss_pde + loss_term
+        loss = Cpd * loss_pde + Ctr * loss_term
+        t_loss_pde += loss_pde.item()
+        t_loss_term += loss_term.item()
+        t_loss += loss.item()
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
         torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
         opt.step()
 
-        if it % 50 == 0:
+        if it % itr == 0:
             rospy.loginfo(
                 "iter=%d  pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs ",
                 it,
-                float(loss_pde.item())/batch,
-                float(loss_term.item())/batch,
-                float(loss.item())/batch,
+                float(t_loss_pde) / (itr*(batch + bt)),
+                float(t_loss_term) / (itr*(batch + bt)),
+                float(t_loss) / (itr*(batch + bt)),
                 time.time() - t0
             )
+            t_loss = 0.0
+            t_loss_pde = 0.0
+            t_loss_term = 0.0
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     checkpoint = {
@@ -345,5 +363,3 @@ def main_():
 
 if __name__ == "__main__":
     main_()
-
-

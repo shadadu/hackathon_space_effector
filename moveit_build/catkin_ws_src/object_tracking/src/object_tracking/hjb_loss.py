@@ -13,9 +13,14 @@ def hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag):
     """
     grad_q = torch.autograd.grad(V.sum(), q, create_graph=True, retain_graph=True)[0]  # (B,7)
     V_t = torch.autograd.grad(V.sum(), t_norm, create_graph=True, retain_graph=True)[0].squeeze(-1)  # (B,)
-    # quad = (grad_q.T * R_inv_diag * grad_q).sum(dim=-1)  # (B,)
-    quad = R_inv_diag * torch.matmul(grad_q, grad_q.T).sum(dim=-1)  # (B,)
-    # print(f'shape of quad: {torch.matmul(grad_q.T, grad_q).shape}, {quad.shape}')
+    # print(f'shape of gra_q.T and grad_q: {(R_inv_diag*grad_q).shape}, {grad_q.shape}')
+    # print(f'shape of grad_q.T and grad_q: {(grad_q*(R_inv_diag * grad_q)).shape}, {grad_q.shape}')
+    # print(f'shape of grad_q.T and grad_q: {((grad_q * (R_inv_diag * grad_q)).sum(dim=-1)).shape}, {grad_q.shape}')
+    # quad = (R_inv_diag * grad_q.T * grad_q).sum(dim=-1)  # (B,)
+    # quad = (grad_q * grad_q.T).sum(dim=-1)  # (B,)
+    quad = (grad_q * (R_inv_diag * grad_q)).sum(dim=-1)
+    # quad = (R_inv_diag * torch.matmul(grad_q.T, grad_q)).sum(dim=-1)  # (B,)
+    # print(f'shape of quad: {quad.shape}')
     # V_t : Neural Net quad: autograd (of Neural Net weights)
     # running_cost: hand-crafted; replace with Neural Net? For example: actor-critic in
     #               DeepPAAC and Aladi DGM Extension papers?
@@ -100,7 +105,6 @@ def hjb_residual_loss_(V, q, t, running_cost, R_inv_diag, vel_limits, Cv=0.0, T=
     R_diag = 1.0 / R_inv_diag
     control_cost = torch.sum((u_star ** 2) * R_diag.view(1, -1), dim=1)  # (B,)
 
-    # New velocity-limit penalty using dist_term
     # bounds are [-vel_limit, +vel_limit]
     vel_penalty_terms = []
     for j in range(u_star.shape[1]):

@@ -20,7 +20,7 @@ from sensor_msgs.msg import JointState
 # Optional Jacobian service hook
 from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
-from object_tracking.dgm_model import DGMValueNet
+from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_
 # from trajectory_executor_manager import get_panda_start_pose
 from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
@@ -106,7 +106,9 @@ def decode(code):
 
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu") -> DGMValueNet:
-    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    model = ValueNet(num_layers=8, input_dim=11, output_dim=1, hidden_size=192).to(device)
+    # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
     checkpoint = torch.load(str(path.resolve()))
     # Load the model state dictionary from the checkpoint
@@ -405,11 +407,7 @@ class DGMPlannerService:
         if not initialize_on_start:
             rospy.loginfo("Startup EE initialization disabled.")
             return True
-        # A: x = 0.35, y = 0.00, z = 0.45
-        # B: x = 0.40, y = 0.00, z = 0.40
-        # C: x = 0.45, y = 0.00, z = 0.35
-        # D: x = 0.40, y = 0.15, z = 0.40
-        # E: x = 0.40, y = -0.15, z = 0.40
+
         init_x = float(rospy.get_param("~init_x", 0.35))
         init_y = float(rospy.get_param("~init_y", 0.00))
         init_z = float(rospy.get_param("~init_z", 0.45))
@@ -443,12 +441,6 @@ class DGMPlannerService:
         pc = mpr.goal_constraints[0].position_constraints[0]
         goal_pose = pc.constraint_region.primitive_poses[0]
         return np.array([goal_pose.position.x, goal_pose.position.y, goal_pose.position.z], dtype=np.float64)
-
-    # def extract_start_position(self, mpr):
-    #     # Expect goal constraint created from Pose constraint in benchmark/intercept planners
-    #     pc = mpr.start_state.joint_state.position.position_constraints[0]
-    #     goal_pose = pc.constraint_region.primitive_poses[0]
-    #     return np.array([goal_pose.position.x, goal_pose.position.y, goal_pose.position.z], dtype=np.float64)
 
     def start_state_q0(self, mpr, active_joints):
         # Prefer provided start_state
