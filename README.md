@@ -57,7 +57,9 @@ More advanced implementations(see references) essentially replace the Riccati eq
 Value Net and the Control Net(u*) with an Actor-Critic RL method. 
 
 Currently, with a well calibrated weights of the terminal and residual losses, we are getting good convergence of the total loss function, though the 
-HJB residual part of the loss seems unstable, the control loss converges smoothly. Experiments are to be run to see how that affects overall trajectory planning
+HJB residual part of the loss seems unstable, the control loss converges smoothly. Smaller learning rates also improve 
+the HJB residual's convergence relative to the terminal loss, but there is still room for improvement.
+Experiments are to be run to see how the relative convergence of terminal and residual losses affects overall trajectory planning
 performance. However, based on the recommendations in the literature, the Actor-Critic method with two(2) neural nets seem to be better solution, 
 and the next major upgrade would be that, after benchmarking the Value Net and Riccati-like method.
 
@@ -80,8 +82,8 @@ foundation for ensuring our DGM works in a simulation and real environment, and 
 
 Mainly, DGM (using Hamilton-Jacobi-Method) training happens offline. During inference, we rollout using the pretrained DGM network, and check the generated
 trajectory for invalid states using in a manner replicating OMPL's checks for invalid trajectories. Other checks and constraints are also applied
-to ensure that the DGM trajectories are smooth and valid and would transfer well to real robots safely. A current exploration is into how to 
-introduce these constraints as penalties in the DGM cost function and/or whether to train a small neural network to predict invalid/valid states to help 
+to ensure that the DGM trajectories are smooth and valid and would transfer well to real robots safely. A current exploration is how to 
+introduce these constraints as penalties in the cost functions and/or whether to train a small neural network to predict invalid/valid states to help 
 with the DGM trajectory rollouts. Though DGM (with minimal training) is currently generating valid trajectories just like OMPL, it's taking longer times and tries; 
 it could be improved upon with some of these validity checks baked in. 
  
