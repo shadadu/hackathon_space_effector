@@ -4,10 +4,10 @@ import rospy
 from trajectory_msgs.msg import JointTrajectoryPoint
 from moveit_msgs.msg import RobotTrajectory
 from typing import List, Tuple, Optional
-from .dgm_model import build_input, DGMValueNet
-
+from .dgm_model import build_input, DGMValueNet, ValueNet, ValueNet_
 
 from dataclasses import dataclass
+
 
 @dataclass
 class RolloutConfig:
@@ -19,8 +19,10 @@ class RolloutConfig:
     R_diag: np.ndarray = None  # (7,)
     max_nan_guard: int = 5
 
+
 def clamp(x, lo, hi):
     return np.minimum(np.maximum(x, lo), hi)
+
 
 def rollout_value_policy(model, q0, goal_pos, active_joints,
                          T=2.0, dt=0.02, R_diag=None,
@@ -72,14 +74,15 @@ def rollout_value_policy(model, q0, goal_pos, active_joints,
 
     return traj
 
+
 def rollout_dgm_joint_policy(
-        model: DGMValueNet,
+        model: ValueNet,
         q0: np.ndarray,
         goal_pos: np.ndarray,
         active_joints: List[str],
         cfg: RolloutConfig,
         device: str = "cpu",
-    ) -> Tuple[RobotTrajectory, np.ndarray]:
+) -> Tuple[RobotTrajectory, np.ndarray]:
     """
     Roll out u* = -0.5 * R^{-1} * grad_q V(q,t,gpos)
     Dynamics: qdot = u
@@ -121,7 +124,7 @@ def rollout_dgm_joint_policy(
         gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
 
         x = build_input(qt, tt, gt)
-        V = model(x)  # (1,)
+        V = model(x, x)  # (1,)
         # grad_q V
         grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
         grad_q_np = grad_q.detach().cpu().numpy().reshape(7)
@@ -138,11 +141,11 @@ def rollout_dgm_joint_policy(
 
         # clamp velocities
         u = clamp(u, -cfg.vel_limits, cfg.vel_limits)
-        rospy.loginfo("Clamped velocities u = \%s", u)
+        # rospy.loginfo("Clamped velocities u = \%s", u)
 
         pt.velocities = u.tolist()
         traj.joint_trajectory.points.append(pt)
-        rospy.loginfo("pt updated: %s", pt)
+        # rospy.loginfo("pt updated: %s", pt)
 
         # integrate forward (except after last point)
         if k < N - 1:

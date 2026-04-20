@@ -21,7 +21,7 @@ from sensor_msgs.msg import JointState
 from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
 from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_
-# from trajectory_executor_manager import get_panda_start_pose
+from trajectory_executor_manager import get_panda_start_pose, get_end_translation
 from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
@@ -72,16 +72,17 @@ def get_panda_start_pose(request):
     except rospy.ServiceException as e:
         rospy.logerr("Service call failed: %s" % e)
 
-def get_joint_state_translation(joint_state):
+def get_final_joint_state_translation(trajectory):
     rospy.wait_for_service('compute_fk')
     fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
 
-    # last_point = plan.trajectory.joint_trajectory.points[-1]
+    last_point = trajectory.joint_trajectory.points[-1]
+    rospy.loginfo("Joint state last_point = %s", last_point)
 
     # Build the RobotState message
     robot_state = RobotState()
-    # robot_state.joint_state.name = plan.trajectory.joint_trajectory.joint_names
-    robot_state.joint_state = joint_state
+    robot_state.joint_state.name = trajectory.joint_trajectory.joint_names
+    robot_state.joint_state.position = last_point.positions
 
     # Create the FK Request
     request = GetPositionFKRequest()
@@ -98,6 +99,33 @@ def get_joint_state_translation(joint_state):
     except rospy.ServiceException as e:
         rospy.logerr("FK service call failed: %s" % e)
 
+
+# def get_plan_joint_state_translation(plan):
+#     rospy.wait_for_service('compute_fk')
+#     fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
+#
+#     # last_point = plan.trajectory.joint_trajectory.points[-1]
+#
+#     # Build the RobotState message
+#     robot_state = RobotState()
+#     robot_state.joint_state.name = plan.trajectory.joint_trajectory.joint_names
+#     robot_state.joint_state = joint_state
+#
+#     # Create the FK Request
+#     request = GetPositionFKRequest()
+#     request.fk_link_names = ["panda_hand"]
+#     request.robot_state = robot_state
+#
+#     try:
+#         response = fk_srv(request)
+#         if response.error_code.val == 1:  # SUCCESS
+#             translation = response.pose_stamped[0].pose.position
+#             orientation = response.pose_stamped[0].pose.orientation
+#             print(f"Joint State EE Position: x={translation.x}, y={translation.y}, z={translation.z}")
+#             return translation, orientation
+#     except rospy.ServiceException as e:
+#         rospy.logerr("FK service call failed: %s" % e)
+
 def decode(code):
     for k, v in MoveItErrorCodes.__dict__.items():
         if isinstance(v, int) and v == code:
@@ -105,7 +133,7 @@ def decode(code):
     return str(code)
 
 
-def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu") -> DGMValueNet:
+def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
     # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
     model = ValueNet(num_layers=8, input_dim=11, output_dim=1, hidden_size=192).to(device)
     # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
@@ -448,13 +476,13 @@ class DGMPlannerService:
             s_map = dict(zip(mpr.start_state.joint_state.name, mpr.start_state.joint_state.position))
             rospy.loginfo("Loaded start state from Motion Plan Request")
             rospy.loginfo("Joint state position: %s", mpr.start_state.joint_state.position)
-            trans, ori = get_joint_state_translation(mpr.start_state.joint_state)
+            # trans, ori = get_joint_state_translation(mpr.start_state.joint_state)
             return np.array([s_map[j] for j in active_joints], dtype=np.float64)
 
         # Else try current state from robot commander
         rospy.loginfo("No start state provided by mpr; loading current robot state as start state")
         st = self.robot.get_current_state()
-        get_joint_state_translation(st.joint_state)
+        # get_joint_state_translation(st.joint_state)
         s_map = dict(zip(st.joint_state.name, st.joint_state.position))
         return np.array([s_map[j] for j in active_joints], dtype=np.float64)
 
@@ -500,8 +528,8 @@ class DGMPlannerService:
         mpr = req.motion_plan_request
         mpr_robot_state = mpr.start_state
         # ee_start_pos = get_panda_start_pose(mpr_start_state)
-        rospy.loginfo("Handle mpr_robot_state = %s", str(mpr_robot_state))
-        rospy.loginfo("Handle mpr ee_start_pos = %s", str(mpr))
+        # rospy.loginfo("Handle mpr_robot_state = %s", str(mpr_robot_state))
+        # rospy.loginfo("Handle mpr ee_start_pos = %s", str(mpr))
 
         resp = MotionPlanResponse()
         resp.error_code.val = MoveItErrorCodes.SUCCESS
@@ -549,10 +577,11 @@ class DGMPlannerService:
             R_diag=self.R_diag,
             max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
         )
-        rospy.loginfo("DGM rollout input q0=%s, active_joints=%s", q0, active_joints)
+        # rospy.loginfo("DGM rollout input q0=%s, active_joints=%s", q0, active_joints)
         rospy.loginfo("DGM goal_pos= %s", goal_pos)
-        rospy.loginfo("jmin and jmax: %s, %s", self.jmin, self.jmax)
-        rospy.loginfo("mpr start state: %s ", mpr.start_state.joint_state.position)
+        # rospy.loginfo("jmin and jmax: %s, %s", self.jmin, self.jmax)
+        # rospy.loginfo("mpr start state: %s ", mpr.start_state.joint_state.position)
+        # ee_pos = get_end_translation(mpr)
         ee_pos = get_ee_translation()
         rospy.loginfo("start state ee pos: %s ", ee_pos)
         t0 = time.time()
@@ -571,6 +600,9 @@ class DGMPlannerService:
             return GetMotionPlanResponse(motion_plan_response=resp)
 
         resp.planning_time = float(time.time() - t0)
+
+        ee_pos_final = get_final_joint_state_translation(traj)
+        rospy.loginfo("ee_pos_final running  = %s", ee_pos_final)
 
         # ---- I.5 enforce time monotonicity ----
         try:
@@ -596,8 +628,8 @@ class DGMPlannerService:
             jmax=self.jmax,
             vel_limits=self.vel_limits,
             dt=self.dt,
-            acc_limits=None,  # you can add later
-            jerk_limits=None,  # you can add later
+            acc_limits=None,
+            jerk_limits=None,
         )
         if not ok_limits:
             rospy.logwarn("DGM plan rejected by limit checks: %s", reason)
@@ -627,6 +659,7 @@ class DGMPlannerService:
 
         if state_validity is not None:
             stride = int(rospy.get_param("~validity_stride", 5))  # check every 5th point by default
+            # ee_pos_final = traj.joint_trajectory.points[-1].positions
             ok_val, bad_k, msg = validate_with_moveit_state_validity(
                 svc=state_validity,
                 active_joints=active_joints,
@@ -636,6 +669,8 @@ class DGMPlannerService:
             )
             if not ok_val:
                 rospy.logwarn("DGM plan rejected by MoveIt validity at k=%d: %s", bad_k, msg)
+                ee_pos_final = get_final_joint_state_translation(traj)
+                rospy.loginfo("ee_pos_final = %s", ee_pos_final)
                 resp.error_code.val = MoveItErrorCodes.INVALID_MOTION_PLAN
                 return GetMotionPlanResponse(motion_plan_response=resp)
 

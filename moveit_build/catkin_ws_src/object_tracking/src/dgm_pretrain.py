@@ -10,6 +10,7 @@ from moveit_commander import MoveGroupCommander
 from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_, build_input, save_checkpoint
 from object_tracking.hjb_loss import hjb_residual_loss, hjb_residual_loss_, terminal_loss
 from object_tracking.fk_client import FKClient
+from datetime import datetime
 
 """
 Reference 
@@ -201,7 +202,7 @@ def main_():
 
     iters = int(rospy.get_param("~iters", 3000))
     batch = int(rospy.get_param("~batch", 192))
-    lr = float(rospy.get_param("~lr", 3e-5))
+    lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
     depth = int(rospy.get_param("~depth", 4))
 
@@ -214,7 +215,7 @@ def main_():
     Cj = float(rospy.get_param("~Cj", 0.01))  # joint position limit penalty weight
     Cv = float(rospy.get_param("~Cv", 0.001))  # joint velocity limit penalty weight
     Ctr = float(rospy.get_param("~Ctr", 100.0))  # joint velocity limit penalty weight
-    Cpd = float(rospy.get_param("~Ctr", 0.05))
+    Cpd = float(rospy.get_param("~Cpd", 0.005))
 
     # State/control weighting
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
@@ -255,6 +256,16 @@ def main_():
     t_loss_term = 0.0
     itr = 10
 
+    now = str(datetime.now()).replace("-", "").replace(" ", ":")
+
+    results_dir = "/Users/rckyi/Documents/GitHub/hackathon_space_effector/moveit_build/"
+    results_file = now + ".csv"
+    results_preamble = str(model) + "\n" + \
+                       f"lr:{lr}" + "\n" \
+                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}"
+
+    print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
+
     for it in range(1, iters + 1):
         q_np = np.random.uniform(jmin, jmax, (batch, 7)).astype(np.float64)
         t_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
@@ -289,18 +300,18 @@ def main_():
         V = model(build_input(q, t, g), build_input(q, t, g))
         # rospy.loginfo("Shape of residual loss inputs %s, %s, %s", V.shape, q.shape, t.shape)
 
-        # loss_pde = hjb_residual_loss(V, q, t, l,
-        #                              R_inv_diag)  # hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag)
+        loss_pde = hjb_residual_loss(V, q, t, l,
+                                     R_inv_diag)  # hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag)
 
-        loss_pde = hjb_residual_loss_(
-            V=V,
-            q=q,
-            t=t,
-            running_cost=l,
-            R_inv_diag=R_inv_diag.to(device),
-            vel_limits=vel_limits,
-            Cv=Cv
-        )
+        # loss_pde = hjb_residual_loss_(
+        #     V=V,
+        #     q=q,
+        #     t=t,
+        #     running_cost=l,
+        #     R_inv_diag=R_inv_diag.to(device),
+        #     vel_limits=vel_limits,
+        #     Cv=Cv
+        # )
 
         # Terminal batch
         bt = max(64, batch // 3)
@@ -339,9 +350,9 @@ def main_():
             rospy.loginfo(
                 "iter=%d  pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs ",
                 it,
-                float(t_loss_pde) / (itr*(batch + bt)),
-                float(t_loss_term) / (itr*(batch + bt)),
-                float(t_loss) / (itr*(batch + bt)),
+                float(t_loss_pde) / (itr * (batch + bt)),
+                float(t_loss_term) / (itr * (batch + bt)),
+                float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
             t_loss = 0.0
