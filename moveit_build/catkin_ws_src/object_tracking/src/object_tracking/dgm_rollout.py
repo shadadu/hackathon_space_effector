@@ -1,12 +1,21 @@
+#!/usr/bin/env python3
 import numpy as np
+import math
 import torch
 import rospy
 from trajectory_msgs.msg import JointTrajectoryPoint
 from moveit_msgs.msg import RobotTrajectory
 from typing import List, Tuple, Optional
+import datetime as datetime
 from .dgm_model import build_input, DGMValueNet, ValueNet, ValueNet_
 
 from dataclasses import dataclass
+
+from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
+from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest
+
+from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest
+from moveit_msgs.msg import RobotTrajectory, RobotState
 
 
 @dataclass
@@ -19,6 +28,45 @@ class RolloutConfig:
     R_diag: np.ndarray = None  # (7,)
     max_nan_guard: int = 5
 
+
+def euclidean_dist(ee_position, goal):
+    d_sq = ((ee_position.x - goal[0]) ** 2 +
+            (ee_position.y - goal[1]) ** 2 +
+            (ee_position.z - goal[2]) ** 2)
+
+    return math.sqrt(d_sq)
+
+
+def get_final_joint_state_translation(trajectory):
+    rospy.wait_for_service('compute_fk')
+    fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
+
+    last_point = trajectory.joint_trajectory.points[-1]
+    rospy.loginfo("Joint state last_point = %s", last_point)
+
+    # Build the RobotState message
+    robot_state = RobotState()
+    robot_state.joint_state.name = trajectory.joint_trajectory.joint_names
+    robot_state.joint_state.position = last_point.positions
+
+    # Create the FK Request
+    request = GetPositionFKRequest()
+    request.fk_link_names = ["panda_hand"]
+    request.robot_state = robot_state
+
+    try:
+        response = fk_srv(request)
+        if response.error_code.val == 1:  # SUCCESS
+            translation = response.pose_stamped[0].pose.position
+            orientation = response.pose_stamped[0].pose.orientation
+            print(f"Joint State EE Position: x={translation.x}, y={translation.y}, z={translation.z}")
+            return translation, orientation
+    except rospy.ServiceException as e:
+        rospy.logerr("FK service call failed: %s" % e)
+
+def enable_dropout(m):
+    if isinstance(m, torch.nn.Dropout):
+        m.train()
 
 def clamp(x, lo, hi):
     return np.minimum(np.maximum(x, lo), hi)
@@ -81,6 +129,7 @@ def rollout_dgm_joint_policy(
         goal_pos: np.ndarray,
         active_joints: List[str],
         cfg: RolloutConfig,
+        proximity_threshold: float = 0.10,
         device: str = "cpu",
 ) -> Tuple[RobotTrajectory, np.ndarray]:
     """
@@ -109,7 +158,17 @@ def rollout_dgm_joint_policy(
     # Precompute R^{-1}
     R_inv = 1.0 / np.maximum(cfg.R_diag.astype(np.float64), 1e-9)
 
-    for k in range(N):
+    k = 0
+    proximity_ee = float('inf')
+
+    model.eval()
+    model.apply(enable_dropout)
+
+    model.eval()
+
+    while (k < N) and (proximity_threshold < proximity_ee):
+        # for k in range(N):
+
         t = k * cfg.dt
         q_hist[k, :] = q
 
@@ -124,7 +183,11 @@ def rollout_dgm_joint_policy(
         gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
 
         x = build_input(qt, tt, gt)
+
+        model.apply(enable_dropout) # add dropout to enable stochasticity
+        # with torch.no_grad():
         V = model(x, x)  # (1,)
+
         # grad_q V
         grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
         grad_q_np = grad_q.detach().cpu().numpy().reshape(7)
@@ -145,12 +208,18 @@ def rollout_dgm_joint_policy(
 
         pt.velocities = u.tolist()
         traj.joint_trajectory.points.append(pt)
-        # rospy.loginfo("pt updated: %s", pt)
+
+        ee_pos, _ = get_final_joint_state_translation(traj)
+        # rospy.loginfo("goal_pos  = %s, ee_pos = %s", ee_pos)
+        proximity_ee = euclidean_dist(ee_pos, goal_pos)
+        rospy.loginfo("goal_pos  = %s, ee_pos = %s, proximity_ee: %s", goal_pos, ee_pos, proximity_ee)
 
         # integrate forward (except after last point)
         if k < N - 1:
             q = q + cfg.dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
+
+        k += 1
 
     rospy.loginfo("traj last point = %s", traj.joint_trajectory.points[-1])
 

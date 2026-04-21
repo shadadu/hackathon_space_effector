@@ -25,9 +25,7 @@ from trajectory_executor_manager import get_panda_start_pose, get_end_translatio
 from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
-from trajectory_executor_manager import panda_extended_open_start_state
-
-import moveit_commander
+# from trajectory_executor_manager import panda_extended_open_start_state, euclidean_dist
 
 from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest
 
@@ -46,31 +44,8 @@ def get_ee_translation():
             return translation, orientation
     except rospy.ServiceException as e:
         rospy.logerr("FK service call failed: %s" % e)
-def get_panda_start_pose(request):
-    rospy.wait_for_service('compute_fk')
-    fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
 
-    fk_request = GetPositionFKRequest()
-    # Specify the link you want the coordinates for
-    fk_request.fk_link_names = ["panda_hand"]
-    fk_request.header.frame_id = "panda_link0"  # Usually the base frame
-    fk_request.robot_state = request.start_state
 
-    try:
-        response = fk_srv(fk_request)
-        if response.error_code.val == 1:
-            pose = response.pose_stamped[0].pose
-
-            # Cartesian Coordinates
-            pos = pose.position
-            # Quaternion Coordinates
-            ori = pose.orientation
-
-            print(f"Start Position: x={pos.x}, y={pos.y}, z={pos.z}")
-            print(f"Start Orientation (Quat): x={ori.x}, y={ori.y}, z={ori.z}, w={ori.w}")
-            return pose
-    except rospy.ServiceException as e:
-        rospy.logerr("Service call failed: %s" % e)
 
 def get_final_joint_state_translation(trajectory):
     rospy.wait_for_service('compute_fk')
@@ -100,32 +75,6 @@ def get_final_joint_state_translation(trajectory):
         rospy.logerr("FK service call failed: %s" % e)
 
 
-# def get_plan_joint_state_translation(plan):
-#     rospy.wait_for_service('compute_fk')
-#     fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
-#
-#     # last_point = plan.trajectory.joint_trajectory.points[-1]
-#
-#     # Build the RobotState message
-#     robot_state = RobotState()
-#     robot_state.joint_state.name = plan.trajectory.joint_trajectory.joint_names
-#     robot_state.joint_state = joint_state
-#
-#     # Create the FK Request
-#     request = GetPositionFKRequest()
-#     request.fk_link_names = ["panda_hand"]
-#     request.robot_state = robot_state
-#
-#     try:
-#         response = fk_srv(request)
-#         if response.error_code.val == 1:  # SUCCESS
-#             translation = response.pose_stamped[0].pose.position
-#             orientation = response.pose_stamped[0].pose.orientation
-#             print(f"Joint State EE Position: x={translation.x}, y={translation.y}, z={translation.z}")
-#             return translation, orientation
-#     except rospy.ServiceException as e:
-#         rospy.logerr("FK service call failed: %s" % e)
-
 def decode(code):
     for k, v in MoveItErrorCodes.__dict__.items():
         if isinstance(v, int) and v == code:
@@ -135,7 +84,7 @@ def decode(code):
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
     # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=8, input_dim=11, output_dim=1, hidden_size=192).to(device)
+    model = ValueNet(num_layers=12, input_dim=11, output_dim=1, hidden_size=192).to(device)
     # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
     checkpoint = torch.load(str(path.resolve()))
@@ -603,6 +552,7 @@ class DGMPlannerService:
 
         ee_pos_final = get_final_joint_state_translation(traj)
         rospy.loginfo("ee_pos_final running  = %s", ee_pos_final)
+        # proximity_ee_final = euclidean_dist(ee_pos_final, goal_pos)
 
         # ---- I.5 enforce time monotonicity ----
         try:

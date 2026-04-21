@@ -104,6 +104,8 @@ class ValueNet(nn.Module):
     def __init__(self, num_layers=1, input_dim=1, output_dim=1, hidden_size=50):
         super().__init__()
 
+        self.dropout = nn.Dropout(p=0.1)
+
         self.layers = nn.ModuleList([DGMLayer0(input_dim, hidden_size)]) + \
                       nn.ModuleList([DGMLayer(input_dim, hidden_size) for _ in range(num_layers)]) + \
                       nn.ModuleList([DGMLayerN(input_dim, output_dim, hidden_size)])
@@ -111,7 +113,7 @@ class ValueNet(nn.Module):
     def forward(self, x, s):
         for i, layer in enumerate(self.layers):
             # print(f"layer {i} = {layer}")
-            x = layer(s, x)
+            x = self.dropout(layer(s, x))
 
         # print(f"out shape: {x.shape}")
         return x.squeeze(-1)
@@ -192,6 +194,8 @@ class ValueNet_(nn.Module):
     def __init__(self, num_layers=1, input_dim=1, output_dim=1, hidden_size=50, expansion_factor=2):
         super().__init__()
 
+        self.dropout = nn.Dropout(p=0.1)
+
         self.layers = nn.ModuleList([DGMLayer0_(input_dim, hidden_size, expansion_factor)]) + \
                       nn.ModuleList([DGMLayer_(input_dim, hidden_size, expansion_factor) for _ in range(num_layers)]) + \
                       nn.ModuleList([DGMLayerN_(input_dim, output_dim, hidden_size, expansion_factor)])
@@ -200,7 +204,7 @@ class ValueNet_(nn.Module):
 
     def forward(self, x, s):
         for i, layer in enumerate(self.layers):
-            x = layer(s, x)
+            x = self.dropout(layer(s, x))
         return x.squeeze(-1)
 
 
