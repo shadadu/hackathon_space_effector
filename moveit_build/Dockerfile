@@ -1,34 +1,40 @@
-FROM ros:noetic
+ARG ROS_PLATFORM=linux/amd64
+FROM --platform=${ROS_PLATFORM} ros:noetic
 
 ENV DEBIAN_FRONTEND=noninteractive
 
 RUN apt-get update && apt-get install -y \
-    ros-noetic-moveit-commander \
-    ros-noetic-rviz \
-    ros-noetic-franka-description \
-    ros-noetic-moveit-resources-panda-description \
-    ros-noetic-moveit-resources-panda-moveit-config \
-    ros-noetic-robot-state-publisher \
-    ros-noetic-joint-state-publisher \
+    build-essential \
     python3-catkin-tools \
     python3-pip \
-    build-essential \
-    ros-noetic-moveit \
-    ros-noetic-moveit-core \
+    ros-noetic-actionlib-msgs \
     ros-noetic-geometry-msgs \
-    ros-noetic-robot-state-publisher \
     ros-noetic-joint-state-publisher \
+    ros-noetic-message-generation \
+    ros-noetic-message-runtime \
+    ros-noetic-moveit \
+    ros-noetic-moveit-commander \
+    ros-noetic-moveit-core \
+    ros-noetic-moveit-msgs \
+    ros-noetic-moveit-resources-panda-description \
+    ros-noetic-moveit-resources-panda-moveit-config \
+    ros-noetic-moveit-ros-move-group \
+    ros-noetic-moveit-ros-planning \
+    ros-noetic-moveit-ros-planning-interface \
+    ros-noetic-nav-msgs \
+    ros-noetic-robot-state-publisher \
+    ros-noetic-roscpp \
+    ros-noetic-roslaunch \
+    ros-noetic-rospy \
+    ros-noetic-rviz \
+    ros-noetic-sensor-msgs \
+    ros-noetic-shape-msgs \
+    ros-noetic-std-msgs \
+    ros-noetic-tf2-geometry-msgs \
+    ros-noetic-tf2-ros \
+    ros-noetic-trajectory-msgs \
+    ros-noetic-xacro \
     && rm -rf /var/lib/apt/lists/*
-
-#RUN #python3 -m pip install --no-cache-dir --upgrade pip setuptools wheel
-# CPU-only PyTorch (works in most docker-on-mac setups)
-#RUN #python3 -m pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
-# ---- Python ML deps ----
-RUN apt-get update && apt-get install -y python3-pip && \
-    pip3 install --no-cache-dir torch torchvision
-
-
 
 # Create catkin workspace
 RUN mkdir -p /root/catkin_ws/src
@@ -37,12 +43,25 @@ WORKDIR /root/catkin_ws/src
 # Copy ALL local ROS packages into the workspace
 COPY catkin_ws_src/ /root/catkin_ws/src/
 
+WORKDIR /root/catkin_ws
+
+# Runtime output directories and executable ROS Python nodes
+RUN mkdir -p /root/catkin_ws/src/object_tracking/models \
+    /root/catkin_ws/src/object_tracking/results \
+    /root/catkin_ws/src/object_tracking/data && \
+    find /root/catkin_ws/src -path '*/src/*.py' -exec chmod +x {} \;
+
+# CPU-only PyTorch for portable Docker hosts. Keep pins compatible with Ubuntu 20.04's Python 3.8.
+RUN pip3 install --no-cache-dir \
+    typing_extensions==4.12.2 \
+    torch==2.4.1+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
 # Install Python dependencies
 COPY ./requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
 # Build
-WORKDIR /root/catkin_ws
 RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
 
 # Auto-source

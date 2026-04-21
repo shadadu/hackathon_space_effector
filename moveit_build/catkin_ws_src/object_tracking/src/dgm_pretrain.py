@@ -189,7 +189,7 @@ def main_():
     )
 
     results_out_path = rospy.get_param(
-        "~out_path",
+        "~results_out_path",
         "/root/catkin_ws/src/object_tracking/results/dgm_results.csv"
     )
 
@@ -224,7 +224,10 @@ def main_():
     itr = 10
 
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
-    results_dir = "/Users/rckyi/Documents/GitHub/hackathon_space_effector/moveit_build/"
+    results_dir = rospy.get_param(
+        "~results_dir",
+        "/root/catkin_ws/src/object_tracking/results"
+    )
     results_file = now + ".csv"
     data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
     results_preamble = str(model) + "\n" + \

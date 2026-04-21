@@ -16,6 +16,7 @@ MOVEIT_NAME="${MOVEIT_NAME:-moveit}"
 ROS_MASTER_IMAGE="${ROS_MASTER_IMAGE:-ros:noetic-ros-core}"
 ASTROBEE_IMAGE="${ASTROBEE_IMAGE:-astrobee_grasp:noetic}"
 MOVEIT_IMAGE="${MOVEIT_IMAGE:-moveit_image:noetic}"
+DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 
 ASTROBEE_LAUNCH="${ASTROBEE_LAUNCH:-roslaunch astrobee_grasp perception.launch}"
 MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rviz:=false}"
@@ -228,7 +229,7 @@ build_image() {
   local image="$1"
   local dir="$2"
   log "Building image $image from $dir"
-  docker build -t "$image" "$dir"
+  docker build --platform "$DOCKER_PLATFORM" --build-arg ROS_PLATFORM="$DOCKER_PLATFORM" -t "$image" "$dir"
   ok "Built image: $image"
 }
 
@@ -238,7 +239,7 @@ start_idle_container() {
   docker_rm_if_exists "$name"
 
   log "Starting container: $name"
-  docker run -d --name "$name" --network "$NET_NAME" \
+  docker run -d --platform "$DOCKER_PLATFORM" --name "$name" --network "$NET_NAME" \
     -e ROS_MASTER_URI="http://$ROS_MASTER_NAME:11311" \
     "$image" bash -lc "tail -f /dev/null" >/dev/null
 
@@ -363,7 +364,7 @@ ensure_network
 LAST_STEP="ros_master"
 docker_rm_if_exists "$ROS_MASTER_NAME"
 log "Starting ROS master"
-docker run -d --name "$ROS_MASTER_NAME" --network "$NET_NAME" -p 11311:11311 \
+docker run -d --platform "$DOCKER_PLATFORM" --name "$ROS_MASTER_NAME" --network "$NET_NAME" -p 11311:11311 \
   "$ROS_MASTER_IMAGE" roscore >/dev/null
 ok "Started $ROS_MASTER_NAME (IP=$(container_ip "$ROS_MASTER_NAME"))"
 wait_for_master
@@ -392,7 +393,7 @@ build_image "$MOVEIT_IMAGE" "$MOVEIT_BUILD_DIR"
 
 LAST_STEP="moveit_start"
 start_idle_container "$MOVEIT_NAME" "$MOVEIT_IMAGE"
-make_scripts_executable "$MOVEIT_NAME" "/root/catkin_ws/src/object_tracking/scripts"
+make_scripts_executable "$MOVEIT_NAME" "/root/catkin_ws/src/object_tracking/src"
 
 log "Building MoveIt workspace"
 ros_exec "$MOVEIT_NAME" "

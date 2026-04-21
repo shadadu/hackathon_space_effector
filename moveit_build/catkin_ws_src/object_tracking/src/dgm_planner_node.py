@@ -8,7 +8,6 @@ import torch
 from torch import optim
 
 from pathlib import Path
-import stat
 
 from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
 from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
@@ -221,7 +220,7 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup after ik EE coordinates before init attempt = %s", get_ee_translation())
 
         # DGM model
-        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/objecttracking/models/panda_dgm_v1.pth")
+        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth")
         self.device = rospy.get_param("~device", "cpu")
         self.model = None  # type: DGMValueNet
 
@@ -245,19 +244,16 @@ class DGMPlannerService:
 
         hidden = int(rospy.get_param("~hidden", 256))
         depth = int(rospy.get_param("~depth", 4))
-        mdl_path = "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
-        path = Path(mdl_path)
-        # Grant owner read/write, and others read (644)
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        path = Path(self.model_path)
         rospy.loginfo(f"path is a file {path.is_file()}")
-        rospy.loginfo(f"path is accessible {os.access(path, os.X_OK)}")
+        rospy.loginfo(f"path is readable {os.access(path, os.R_OK)}")
         if Path.exists(path):
             self.model = load_model(path=path, hidden=hidden, depth=depth, lr=3e-4, device=self.device)
-            rospy.loginfo("Loaded DGM model: %s", mdl_path)
+            rospy.loginfo("Loaded DGM model: %s", self.model_path)
         else:
             # rospy.loginfo(f"File path exists? {os.path.exists()}")
-            rospy.loginfo("DGM model not found at %s. Planner will return ROBOT_STATE_STALE.", mdl_path)
-            # raise Exception(f"DGM model not found or not loaded via path {mdl_path}. Planner will return ROBOT_STATE_STALE.")
+            rospy.loginfo("DGM model not found at %s. Planner will return ROBOT_STATE_STALE.", self.model_path)
+            # raise Exception(f"DGM model not found or not loaded via path {self.model_path}. Planner will return ROBOT_STATE_STALE.")
 
         if self.use_jacobian_hook:
             rospy.wait_for_service(self.jacobian_service, timeout=60.0)

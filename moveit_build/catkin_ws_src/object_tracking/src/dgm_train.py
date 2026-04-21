@@ -77,7 +77,7 @@ def main():
     R_inv = 1.0 / np.maximum(R_diag, 1e-9)
 
     # Model save
-    out_path = rospy.get_param("~out_path", "/root/catkin_ws/src/objecttracking/models/panda_dgm_v1.pt")
+    out_path = rospy.get_param("~out_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth")
 
     robot = RobotCommander()
     group = MoveGroupCommander("panda_arm")
