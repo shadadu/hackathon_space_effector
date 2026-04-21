@@ -1,0 +1,25 @@
+<launch>
+
+  <!-- ===================== -->
+  <!-- Gazebo (Headless)     -->
+  <!-- ===================== -->
+  <include file="$(find gazebo_ros)/launch/empty_world.launch">
+    <arg name="paused" value="false"/>
+    <arg name="use_sim_time" value="true"/>
+    <arg name="gui" value="false"/>
+  </include>
+
+  <!-- ===================== -->
+  <!-- Spawn Free Object     -->
+  <!-- ===================== -->
+  <node pkg="gazebo_ros"
+        type="spawn_model"
+        name="spawn_object"
+        args="-urdf -param object_description -model free_object -x 1 -y 0 -z 0.5"/>
+
+  <!-- ===================== -->
+  <!-- Perception Stack      -->
+  <!-- ===================== -->
+  <include file="$(find astrobee_grasp)/launch/perception.launch"/>
+
+</launch>

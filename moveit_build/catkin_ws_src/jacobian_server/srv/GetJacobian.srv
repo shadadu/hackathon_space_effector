@@ -1,0 +1,10 @@
+string group_name
+string link_name
+string[] joint_names
+float64[] joint_positions
+geometry_msgs/Point reference_point
+---
+float64[] jacobian
+int32 rows
+int32 cols
+string message

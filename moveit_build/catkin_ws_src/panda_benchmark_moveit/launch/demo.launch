@@ -1,0 +1,87 @@
+<launch>
+  <arg name="rviz" default="false"/>
+  <arg name="use_sim_time" default="false"/>
+
+  <!-- Start MoveIt server -->
+  <include file="$(find panda_benchmark_moveit)/launch/move_group.launch">
+    <arg name="use_sim_time" value="$(arg use_sim_time)"/>
+  </include>
+
+  <!-- DGM planner service endpoint -->
+  <node pkg="object_tracking"
+        type="dgm_planner_node.py"
+        name="dgm_planner"
+        output="screen">
+    <param name="service_name" value="/dgm/get_motion_plan"/>
+    <param name="group_name" value="panda_arm"/>
+    <param name="ee_link" value="panda_hand"/>
+    <param name="world_frame" value="world"/>
+
+    <!-- Load DGM params (T, dt, R_diag, vel_limits, finetune settings, etc.) -->
+    <rosparam file="$(find object_tracking)/config/dgm.yaml" command="load"/>
+
+    <!-- checkpoint -->
+    <param name="model_path" value="$(find object_tracking)/models/panda_dgm_v1.pth"/>
+    <param name="device" value="cpu"/>
+
+    <!-- (optional for future Jacobian hook; safe even if ignored by code) -->
+    <param name="jacobian_service" value="/get_jacobian"/>
+    <param name="use_jacobian_hook" value="false"/>
+  </node>
+
+  <!-- Dynamic object -> planning scene -->
+  <node pkg="object_tracking"
+        type="object_to_planning_scene.py"
+        name="object_to_planning_scene"
+        output="screen"/>
+
+    <!-- Always-on evaluator -->
+  <node pkg="object_tracking" type="intercept_evaluator.py" name="intercept_evaluator" output="screen">
+    <param name="world_frame" value="world"/>
+    <param name="ee_frame" value="panda_hand"/>
+    <param name="object_frame" value="object_link"/>
+    <param name="rate_hz" value="50.0"/>
+  </node>
+
+  <!-- Manager does plan->execute->retry and gates metrics -->
+  <node pkg="object_tracking" type="trajectory_executor_manager.py" name="trajectory_executor_manager" output="screen">
+    <param name="object_topic" value="/object/state"/>
+    <param name="metrics_topic" value="/intercept/eval/metrics"/>
+
+    <param name="plan_service" value="/plan_kinematic_path"/> <!-- or /dgm/get_motion_plan -->
+    <param name="execute_action" value="/execute_trajectory"/>
+
+    <param name="group_name" value="panda_arm"/>
+    <param name="ee_link" value="panda_hand"/>
+    <param name="world_frame" value="world"/>
+
+    <param name="eps_pos" value="0.03"/>
+    <param name="eps_ang" value="0.35"/>
+    <param name="eval_window_s" value="2.5"/>
+
+    <param name="max_attempts" value="5"/>
+    <param name="allowed_planning_time" value="2.0"/>
+    <param name="num_planning_attempts" value="3"/>
+    <param name="vel_scale" value="0.3"/>
+    <param name="acc_scale" value="0.3"/>
+
+    <param name="loop_hz" value="1.0"/>
+
+    <param name="initialize_on_start" value="true" />
+    <param name="init_x" value="0.40" />
+    <param name="init_y" value="0.00" />
+    <param name="init_z" value="0.35" />
+    <param name="init_use_current_orientation" value="true" />
+
+    <param name="init_planning_time" value="5.0" />
+    <param name="init_num_attempts" value="5" />
+    <param name="init_vel_scale" value="0.25" />
+    <param name="init_acc_scale" value="0.25" />
+
+  </node>
+
+  <group if="$(arg rviz)">
+    <node pkg="rviz" type="rviz" name="rviz" output="screen"
+          args="-d $(find moveit_resources_panda_moveit_config)/launch/moveit.rviz"/>
+  </group>
+</launch>

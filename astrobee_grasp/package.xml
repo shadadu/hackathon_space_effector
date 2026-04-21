@@ -1,0 +1,27 @@
+<?xml version="1.0"?>
+<package format="2">
+  <name>astrobee_grasp</name>
+  <version>0.0.1</version>
+  <description>
+    Perception, pose estimation, and grasping stack for NASA Astrobee
+  </description>
+
+  <maintainer email="you@example.com">Your Name</maintainer>
+  <license>MIT</license>
+
+  <!-- Build tool -->
+  <buildtool_depend>catkin</buildtool_depend>
+
+  <!-- Runtime dependencies -->
+  <exec_depend>rospy</exec_depend>
+  <exec_depend>geometry_msgs</exec_depend>
+  <exec_depend>nav_msgs</exec_depend>
+  <exec_depend>tf2_ros</exec_depend>
+  <exec_depend>std_msgs</exec_depend>
+  <depend>sensor_msgs</depend>
+  <depend>visualization_msgs</depend>
+
+  <!-- For launch files -->
+  <exec_depend>roslaunch</exec_depend>
+
+</package>

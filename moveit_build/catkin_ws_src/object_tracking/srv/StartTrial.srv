@@ -1,0 +1,13 @@
+# Request
+string planner_service         # "/plan_kinematic_path" or "/dgm/get_motion_plan"
+int32 max_attempts             # override default if >0 else use node param
+float32 eval_window_s          # override if >0 else use node param
+float32 eps_pos                # override if >0 else use node param
+float32 eps_ang                # override if >0 else use node param
+string trial_id                # optional, can be empty
+
+---
+# Response (returns immediately)
+bool accepted
+string message
+string active_trial_id

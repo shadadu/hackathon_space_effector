@@ -1,0 +1,7 @@
+# Top-level Astrobee image dependencies.
+#
+# Keep this file small: Dockerfile installs it for the perception container,
+# where the launch path only imports numpy and scipy. The MoveIt/DGM image has
+# its own requirements file and installs CPU-only torch explicitly.
+numpy>=1.22
+scipy>=1.7

@@ -1,0 +1,43 @@
+ekf:
+  dt: 0.02  # 50 Hz
+
+  # -------------------------
+  # Process Noise (Q)
+  # -------------------------
+  process_noise:
+    position: 1.0e-6
+    velocity: 1.0e-4
+    orientation: 1.0e-6
+
+  # -------------------------
+  # Measurement Noise (R)
+  # -------------------------
+  measurement_noise:
+    position: 5.0e-4     # meters^2
+    orientation: 2.0e-3  # rad^2
+
+  # -------------------------
+  # Initial Covariance (P0)
+  # -------------------------
+  initial_covariance:
+    position: 1.0e-3
+    velocity: 1.0e-2
+    orientation: 1.0e-3
+
+  # -------------------------
+  # Frame Configuration
+  # -------------------------
+  frames:
+    world: "world"
+    object: "object"
+
+  # -------------------------
+  # Gating / Safety
+  # -------------------------
+  max_position_jump: 0.25     # meters
+  max_rotation_jump: 0.35     # radians
+
+  # -------------------------
+  # Simulation Flags
+  # -------------------------
+  zero_gravity: true
