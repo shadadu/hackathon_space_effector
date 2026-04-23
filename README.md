@@ -7,14 +7,17 @@ Stack:
 2. MoveIt: https://moveit.picknik.ai/main/index.html
 
 # Platform
-Currently development is on a Apple Silicon with Docker containerization for our research and benchmarking. Better performance (and possibly less boilerplate) would be achieved with Linux
-Ubuntu since Ros and MoveIt are not fully supported on Mac, but fully-supported on Ubuntu. RViz and Gazebo are unstable 
-in the MacOS environment, so for now, object location, robot arm locations, trajectory and time point rollouts, proximity thresholds are being used to 
-compute intercepts and success of trajectory planning. After the Deep Galerkin Method(DGM) NN training and inference pipelines
-have been benchmarked satisfactorily, we would migrate to an Ubuntu VM where visualizations are better supported.
+Original platform was MacOS with docker. Robotics platforms such as MoveIt, Gazebo, ROS, don't play very well on MacOS; they're are more functional on Linux/Ubuntu. Migration to Ubuntu VM + Docker is nearly complete.
 
+Run the below command to launch the perception view in Gazebo. This displays the object without the MoveIt Panda arm.
+
+`
+xhost +local:docker
+
+ASTROBEE_ENABLE_X11=true ASTROBEE_LAUNCH='roslaunch astrobee_grasp gazebo_perception.launch gui:=true' ./bring_up.sh
+`
 # Coding Assistance
-ChaptGPT 5.2+
+ChaptGPT 5.2+, Codex
 
 # Running the services
 The stack provides a simulation platform for researching and testing micro-gravity environment Optimal Control and Deep Learning based trajectory planners and executors.
