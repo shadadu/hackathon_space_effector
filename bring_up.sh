@@ -20,6 +20,7 @@ DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 
 ASTROBEE_LAUNCH="${ASTROBEE_LAUNCH:-roslaunch astrobee_grasp perception.launch}"
 MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rviz:=false}"
+ASTROBEE_ENABLE_X11="${ASTROBEE_ENABLE_X11:-false}"
 
 MASTER_TIMEOUT="${MASTER_TIMEOUT:-20}"
 ASTROBEE_TIMEOUT="${ASTROBEE_TIMEOUT:-120}"
@@ -239,9 +240,28 @@ start_idle_container() {
   docker_rm_if_exists "$name"
 
   log "Starting container: $name"
-  docker run -d --platform "$DOCKER_PLATFORM" --name "$name" --network "$NET_NAME" \
-    -e ROS_MASTER_URI="http://$ROS_MASTER_NAME:11311" \
-    "$image" bash -lc "tail -f /dev/null" >/dev/null
+  local docker_args=(
+    docker run -d
+    --platform "$DOCKER_PLATFORM"
+    --name "$name"
+    --network "$NET_NAME"
+    -e "ROS_MASTER_URI=http://$ROS_MASTER_NAME:11311"
+  )
+
+  if [[ "$name" == "$ASTROBEE_NAME" ]]; then
+    if [[ "$ASTROBEE_ENABLE_X11" == "true" || "$ASTROBEE_ENABLE_X11" == "1" ]]; then
+      docker_args+=(
+        -e "DISPLAY=${DISPLAY:-:0}"
+        -e "QT_X11_NO_MITSHM=1"
+        -v "/tmp/.X11-unix:/tmp/.X11-unix:rw"
+      )
+      if [[ -d /dev/dri ]]; then
+        docker_args+=(--device /dev/dri)
+      fi
+    fi
+  fi
+
+  "${docker_args[@]}" "$image" bash -lc "tail -f /dev/null" >/dev/null
 
   ok "Started $name (IP=$(container_ip "$name"))"
 }

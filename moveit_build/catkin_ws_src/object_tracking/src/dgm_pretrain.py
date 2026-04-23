@@ -168,15 +168,15 @@ def main_():
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
-    Cj = float(rospy.get_param("~Cj", 0.01))
-    Cv = float(rospy.get_param("~Cv", 0.001))
+    Cj = float(rospy.get_param("~Cj", 0.1))
+    Cv = float(rospy.get_param("~Cv", 0.01))
     Ctr = float(rospy.get_param("~Ctr", 100.0))
-    Cpd = float(rospy.get_param("~Cpd", 0.001))
+    Cpd = float(rospy.get_param("~Cpd", 0.01))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
     R_inv_diag = 1.0 / R_diag
-
+    
     vel_limits_np = np.array(
         rospy.get_param("~vel_limits", [2.0] * 7),
         dtype=np.float64
@@ -210,8 +210,8 @@ def main_():
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
     # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=12, input_dim=11, output_dim=1, hidden_size=192)
-    # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1)
+    model = ValueNet(num_layers=64, input_dim=11, output_dim=1, hidden_size=192)
+    # model = ValueNet_(num_layers=32, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1)
 
     opt = optim.Adam(model.parameters(), lr=lr)
 
@@ -299,24 +299,24 @@ def main_():
 
         V = model(build_input(q, t, g), build_input(q, t, g))
 
-        # loss_pde = hjb_residual_loss(
-        #     V,
-        #     q,
-        #     t,
-        #     l,
-        #     R_inv_diag
-        # )
+        loss_pde = hjb_residual_loss(
+            V,
+            q,
+            t,
+            l,
+            R_inv_diag
+        )
 
         #
-        loss_pde = hjb_residual_loss_(
-            V=V,
-            q=q,
-            t=t,
-            running_cost=l,
-            R_inv_diag=R_inv_diag.to(device),
-            vel_limits=vel_limits,
-            Cv=Cv
-        )
+        # loss_pde = hjb_residual_loss_(
+        #     V=V,
+        #     q=q,
+        #     t=t,
+        #     running_cost=l,
+        #     R_inv_diag=R_inv_diag.to(device),
+        #     vel_limits=vel_limits,
+        #     Cv=Cv
+        # )
 
         # Terminal batch
 
