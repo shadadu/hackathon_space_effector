@@ -72,9 +72,15 @@ def clamp(x, lo, hi):
     return np.minimum(np.maximum(x, lo), hi)
 
 
-def rollout_value_policy(model, q0, goal_pos, active_joints,
-                         T=2.0, dt=0.02, R_diag=None,
-                         vel_limits=None, joint_min=None, joint_max=None,
+def rollout_value_policy(model,
+                         q0,
+                         goal_pos,
+                         active_joints,
+                         T=2.0, dt=0.02,
+                         R_diag=None,
+                         vel_limits=None,
+                         joint_min=None,
+                         joint_max=None,
                          device="cpu"):
     """
     u* = -0.5 R^{-1} grad_q V, qdot=u
@@ -120,11 +126,11 @@ def rollout_value_policy(model, q0, goal_pos, active_joints,
             if joint_min is not None and joint_max is not None:
                 q = clamp(q, joint_min, joint_max)
 
-    return traj
+    return traj, q
 
 
 def rollout_dgm_joint_policy(
-        model: ValueNet,
+        model,
         q0: np.ndarray,
         goal_pos: np.ndarray,
         active_joints: List[str],
@@ -145,6 +151,8 @@ def rollout_dgm_joint_policy(
     assert cfg.joint_min is not None and cfg.joint_max is not None
 
     rospy.loginfo("Executing DGM Value Net rollout ")
+
+    rospy.loginfo("Value of T =%s and dt = %s", cfg.T, cfg.dt)
 
     N = int(round(cfg.T / cfg.dt)) + 1
     q = q0.astype(np.float64).copy()
@@ -186,7 +194,8 @@ def rollout_dgm_joint_policy(
 
         model.apply(enable_dropout) # add dropout to enable stochasticity
         # with torch.no_grad():
-        V = model(x, x)  # (1,)
+        # V = model(x, x)  # (1,)
+        V = model(x)
 
         # grad_q V
         grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
@@ -222,5 +231,6 @@ def rollout_dgm_joint_policy(
         k += 1
 
     rospy.loginfo("traj last point = %s", traj.joint_trajectory.points[-1])
+    rospy.loginfo("q_hist = %s", q_hist)
 
     return traj, q_hist

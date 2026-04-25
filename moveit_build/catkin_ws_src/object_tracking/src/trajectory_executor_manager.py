@@ -27,11 +27,11 @@ from sensor_msgs.msg import JointState
 
 from intercept_evaluator import quatern, quatern_conj, quat_angle, quat_mul
 
-def euclidean_dist(ee_position, goal):
 
-    d_sq = ((ee_position.x - goal.x)**2 +
-            (ee_position.y - goal.y)**2 +
-            (ee_position.z - goal.z)**2)
+def euclidean_dist(ee_position, goal):
+    d_sq = ((ee_position.x - goal.x) ** 2 +
+            (ee_position.y - goal.y) ** 2 +
+            (ee_position.z - goal.z) ** 2)
 
     return math.sqrt(d_sq)
 
@@ -120,6 +120,7 @@ def make_position_only_constraints(goal: PoseStamped, link_name: str, pos_tol: f
     c.position_constraints.append(pc)
     return c
 
+
 def get_panda_start_pose(start_state):
     rospy.wait_for_service('compute_fk')
     fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
@@ -145,6 +146,7 @@ def get_panda_start_pose(start_state):
             return pos
     except rospy.ServiceException as e:
         rospy.logerr("Service call failed: %s" % e)
+
 
 def get_end_translation(plan):
     rospy.wait_for_service('compute_fk')
@@ -172,6 +174,7 @@ def get_end_translation(plan):
             return translation, orientation
     except rospy.ServiceException as e:
         rospy.logerr("FK service call failed: %s" % e)
+
 
 class TrajectoryExecutorManager:
     """
@@ -201,7 +204,7 @@ class TrajectoryExecutorManager:
         self.max_attempts_default = int(rospy.get_param("~max_attempts", 10))
         self.eval_window_default = float(rospy.get_param("~eval_window_s", 5.0))
         self.eps_pos_default = float(rospy.get_param("~eps_pos", 0.3))
-        self.eps_ang_default = float(rospy.get_param("~eps_ang", math.pi/2))
+        self.eps_ang_default = float(rospy.get_param("~eps_ang", math.pi / 2))
 
         # Planning params
         self.allowed_planning_time = float(rospy.get_param("~allowed_planning_time", 6.0))
@@ -412,7 +415,7 @@ class TrajectoryExecutorManager:
             return
 
         ee_pos = get_panda_start_pose(start_state=self.start_state)
-        rospy.loginfo("TrajectoryExecutorManager @ _attemp_step end-effector pos = %s", ee_pos)
+        rospy.loginfo("TrajectoryExecutorManager @ _attempt_step end-effector pos = %s", ee_pos)
 
         # Update mins while active
         if self.last_metrics is not None:
@@ -434,10 +437,10 @@ class TrajectoryExecutorManager:
             self.publish_status(f"PLANNING {self.active['trial_id']} attempt={self.active['attempt_idx']}")
             try:
                 plan_resp, plan_dt = self.call_planner(self.active["planner_service"], mpr)
-                goal = self.pick_goal_pose(self.last_odom)
+                # goal = self.pick_goal_pose(self.last_odom)
                 ee_position, ee_orientation = get_end_translation(plan_resp)
                 ed = euclidean_dist(ee_position=ee_position, goal=goal.pose.position)
-                rospy.loginfo("ee orientation =%s",ee_orientation.w)
+                rospy.loginfo("ee orientation =%s", ee_orientation.w)
                 qerr = quat_mul(quatern_conj(ee_orientation), quatern(goal.pose.orientation))
                 ang_delta = quat_angle(qerr)
                 rospy.loginfo("ee orientation ang_ =%s", ang_delta)
@@ -496,7 +499,8 @@ class TrajectoryExecutorManager:
 
             self.active["attempt_idx"] += 1
             if self.active["attempt_idx"] >= self.active["max_attempts"]:
-                rospy.loginfo("Time out window exceeded %s, %s ", self.active["attempt_idx"], self.active["max_attempts"])
+                rospy.loginfo("Time out window exceeded %s, %s ", self.active["attempt_idx"],
+                              self.active["max_attempts"])
                 self._finish_trial(False, "timeout_window")
                 return
 

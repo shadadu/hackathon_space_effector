@@ -29,6 +29,7 @@ from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 from moveit_msgs.srv import GetPositionFK, GetPositionFKRequest
 
+
 def get_ee_translation():
     rospy.wait_for_service('compute_fk')
     fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
@@ -44,7 +45,6 @@ def get_ee_translation():
             return translation, orientation
     except rospy.ServiceException as e:
         rospy.logerr("FK service call failed: %s" % e)
-
 
 
 def get_final_joint_state_translation(trajectory):
@@ -83,9 +83,9 @@ def decode(code):
 
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
-    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=12, input_dim=11, output_dim=1, hidden_size=192).to(device)
-    # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
+    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    # model = ValueNet(num_layers=16, input_dim=11, output_dim=1, hidden_size=192).to(device)
+    # model = ValueNet_(num_layers=12, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=2).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
     checkpoint = torch.load(str(path.resolve()))
     # Load the model state dictionary from the checkpoint
@@ -413,6 +413,7 @@ class DGMPlannerService:
             rospy.logwarn("Robot initialization was requested but did not succeed.")
 
         return ok
+
     def extract_goal_position(self, mpr):
         # Expect goal constraint created from Pose constraint in benchmark/intercept planners
         pc = mpr.goal_constraints[0].position_constraints[0]
@@ -448,7 +449,7 @@ class DGMPlannerService:
             ikreq.ik_request.pose_stamped.header.frame_id = goal_frame
             ikreq.ik_request.pose_stamped.pose = goal_pose
             ikreq.ik_request.robot_state = mpr.start_state if (
-                        mpr.start_state and mpr.start_state.joint_state.name) else self.robot.get_current_state()
+                    mpr.start_state and mpr.start_state.joint_state.name) else self.robot.get_current_state()
             ikreq.ik_request.timeout = rospy.Duration(0.2)
             ikresp = self.ik(ikreq)
             return ikresp.error_code.val == MoveItErrorCodes.SUCCESS
@@ -543,6 +544,14 @@ class DGMPlannerService:
                 cfg=cfg,
                 device=self.device,
             )
+            # traj, q_hist = rollout_value_policy(model=self.model,
+            #                                     q0=q0,
+            #                                     goal_pos=goal_pos,
+            #                                     active_joints=active_joints,
+            #                                     T=cfg.T, dt=cfg.dt,
+            #                                     R_diag=self.R_diag,
+            #                                     vel_limits=self.vel_limits,
+            #                                     joint_min=self.jmin, joint_max=self.jmax)
         except Exception as e:
             rospy.logerr("DGM rollout failed: %s", str(e))
             resp.error_code.val = MoveItErrorCodes.PLANNING_FAILED

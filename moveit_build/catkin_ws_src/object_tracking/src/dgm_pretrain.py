@@ -155,7 +155,7 @@ def main_():
     print(f"numpy version: {np.__version__}")
 
     device = rospy.get_param("~device", "cpu")
-    T = float(rospy.get_param("~T", 2.0))
+    T = float(rospy.get_param("~T", 10.0))
 
     iters = int(rospy.get_param("~iters", 3000))
     batch = int(rospy.get_param("~batch", 192))
@@ -168,8 +168,8 @@ def main_():
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
-    Cj = float(rospy.get_param("~Cj", 0.1))
-    Cv = float(rospy.get_param("~Cv", 0.001))
+    Cj = float(rospy.get_param("~Cj", 0.001))
+    Cv = float(rospy.get_param("~Cv", 0.01))
     Ctr = float(rospy.get_param("~Ctr", 100.0))
     Cpd = float(rospy.get_param("~Cpd", 0.001))
 
@@ -188,9 +188,9 @@ def main_():
         "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
     )
 
-    results_out_path = rospy.get_param(
-        "~out_path",
-        "/root/catkin_ws/src/object_tracking/results/dgm_results.csv"
+    train_perf_data_path = rospy.get_param(
+        "~train_perf_path",
+        "/root/catkin_ws/src/object_tracking/models/train_perf_data.csv"
     )
 
     group_name = rospy.get_param("~group_name", "panda_arm")
@@ -209,9 +209,9 @@ def main_():
     rospy.wait_for_service(state_validity_service)
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
-    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=12, input_dim=11, output_dim=1, hidden_size=192)
-    # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1)
+    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    # model = ValueNet(num_layers=16, input_dim=11, output_dim=1, hidden_size=192)
+    # model = ValueNet_(num_layers=12, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=2)
 
     opt = optim.Adam(model.parameters(), lr=lr)
 
@@ -233,9 +233,16 @@ def main_():
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
 
-
     total_validity_checks = 0
     total_rejected_states = 0
+
+    os.makedirs(os.path.dirname(train_perf_data_path), exist_ok=True)
+
+    with open(train_perf_data_path, "a") as f:
+        f.write(results_preamble)
+
+    # with open(train_perf_data_path, "w") as f:
+    #     f.write(results_preamble + "\n\n")
 
     for it in range(1, iters + 1):
 
@@ -272,7 +279,6 @@ def main_():
                 jmax=jmax,
                 batch_size=batch,
             )
-
         t_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
         g_np = sample_goals(batch)
 
@@ -294,7 +300,8 @@ def main_():
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
-        V = model(build_input(q, t, g), build_input(q, t, g))
+        # V = model(build_input(q, t, g), build_input(q, t, g))
+        V = model(build_input(q, t, g))
 
         # loss_pde = hjb_residual_loss(
         #     V,
@@ -344,9 +351,10 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
-        loss_term = terminal_loss(VT, phi)
+        # VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
+        VT = model(build_input(qT, tT, gT))
 
+        loss_term = terminal_loss(VT, phi)
         loss = Cpd * loss_pde + Ctr * loss_term
         t_loss_pde += loss_pde.item()
         t_loss_term += loss_term.item()
@@ -354,7 +362,7 @@ def main_():
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
         opt.step()
 
         if it % itr == 0:
@@ -366,11 +374,13 @@ def main_():
                 float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
-            data_line = (f"{it}.2fs"
-                         f"{float(t_loss_pde) / (itr * (batch + bt))}.4fs"
-                         f",{float(t_loss_term) / (itr * (batch + bt))}.4fs"
-                         f",{float(t_loss) / (itr * (batch + bt))}.4fs"
+            data_line = (f"{it}"
+                         f",{float(t_loss_pde) / (itr * (batch + bt))}"
+                         f",{float(t_loss_term) / (itr * (batch + bt))}"
+                         f",{float(t_loss) / (itr * (batch + bt))}"
                          )
+            with open(train_perf_data_path, "a") as f:
+                f.write(data_line + "\n")
             t_loss_pde = 0.0
             t_loss_term = 0.0
             t_loss = 0.0
@@ -386,7 +396,8 @@ def main_():
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)
     rospy.loginfo("DONE. Saved final: %s", out_path)
-    rospy.loginfo("Total training time = %%.1fs mins", str((time.time() - t0) / 60))
+    rospy.loginfo("Total training time = %s mins", str((time.time() - t0) / 60))
+    f.close()
 
 
 if __name__ == "__main__":
