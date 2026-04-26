@@ -169,9 +169,8 @@ def main_():
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
     Cj = float(rospy.get_param("~Cj", 0.001))
-    Cv = float(rospy.get_param("~Cv", 0.01))
-    Ctr = float(rospy.get_param("~Ctr", 100.0))
-    Cpd = float(rospy.get_param("~Cpd", 0.001))
+    Cv = float(rospy.get_param("~Cv", 0.001))
+    Ctr = float(rospy.get_param("~Ctr", 1000.0))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
@@ -209,8 +208,8 @@ def main_():
     rospy.wait_for_service(state_validity_service)
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
-    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    # model = ValueNet(num_layers=16, input_dim=11, output_dim=1, hidden_size=192)
+    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    model = ValueNet(num_layers=8, input_dim=11, output_dim=1, hidden_size=192)
     # model = ValueNet_(num_layers=12, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=2)
 
     opt = optim.Adam(model.parameters(), lr=lr)
@@ -229,7 +228,7 @@ def main_():
     data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
     results_preamble = str(model) + "\n" + \
                        f"lr:{lr}" + "\n" \
-                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n" + data_header
+                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr}\n" + data_header
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
 
@@ -300,8 +299,8 @@ def main_():
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
-        # V = model(build_input(q, t, g), build_input(q, t, g))
-        V = model(build_input(q, t, g))
+        V = model(build_input(q, t, g), build_input(q, t, g))
+        # V = model(build_input(q, t, g))
 
         # loss_pde = hjb_residual_loss(
         #     V,
@@ -324,7 +323,8 @@ def main_():
 
         # Terminal batch
 
-        bt = max(64, batch // 3)
+        # bt = max(64, batch // 3)
+        bt = max(16, batch // 3)
 
         qT_np = sample_valid_q_batch(
             svc=validity_svc,
@@ -351,11 +351,11 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        # VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
-        VT = model(build_input(qT, tT, gT))
+        VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
+        # VT = model(build_input(qT, tT, gT))
 
         loss_term = terminal_loss(VT, phi)
-        loss = Cpd * loss_pde + Ctr * loss_term
+        loss = loss_pde + Ctr * loss_term
         t_loss_pde += loss_pde.item()
         t_loss_term += loss_term.item()
         t_loss += loss.item()

@@ -83,8 +83,8 @@ def decode(code):
 
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
-    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    # model = ValueNet(num_layers=16, input_dim=11, output_dim=1, hidden_size=192).to(device)
+    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    model = ValueNet(num_layers=8, input_dim=11, output_dim=1, hidden_size=192).to(device)
     # model = ValueNet_(num_layers=12, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=2).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
     checkpoint = torch.load(str(path.resolve()))
