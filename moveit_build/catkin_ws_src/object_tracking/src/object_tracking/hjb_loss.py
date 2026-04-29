@@ -120,3 +120,219 @@ def hjb_residual_loss_(V, q, t, running_cost, R_inv_diag, vel_limits, Cv=0.0, T=
     residual = dV_dt + total_running_cost + drift_term
 
     return torch.mean(residual ** 2)
+
+
+def hjb_residual_(
+    V,
+    q,
+    t_norm,
+    running_cost,
+    R_inv_diag,
+    reduction="mean",
+    return_residual=False,
+):
+    """
+    HJB residual loss for kinematic optimal control.
+
+    Assumes control cost:
+
+        0.5 * u^T R u
+
+    and optimal control:
+
+        u* = -R^{-1} grad_q V
+
+    HJB residual:
+
+        V_t + running_cost - 0.5 * grad_q V^T R^{-1} grad_q V = 0
+
+    Args:
+        V:
+            Value function output, shape (batch, 1) or (batch,).
+
+        q:
+            Joint state tensor, shape (batch, 7), requires_grad=True.
+
+        t_norm:
+            Normalized time tensor, shape (batch, 1), requires_grad=True.
+            If t_norm = t / T, then V_t here is with respect to normalized time.
+
+        running_cost:
+            Per-sample running cost, shape (batch,) or (batch, 1).
+
+        R_inv_diag:
+            Diagonal inverse control-cost weights, shape (7,).
+
+        reduction:
+            "mean", "sum", or "none".
+
+        return_residual:
+            If True, return (loss, residual_vec).
+
+    Returns:
+        loss, or (loss, residual_vec)
+    """
+
+    if V.ndim == 2 and V.shape[1] == 1:
+        V_scalar = V[:, 0]
+    else:
+        V_scalar = V.reshape(-1)
+
+    running_cost = running_cost.reshape(-1)
+
+    if R_inv_diag.device != q.device:
+        R_inv_diag = R_inv_diag.to(q.device)
+
+    if R_inv_diag.dtype != q.dtype:
+        R_inv_diag = R_inv_diag.to(dtype=q.dtype)
+
+    grad_q = torch.autograd.grad(
+        outputs=V_scalar.sum(),
+        inputs=q,
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True,
+    )[0]
+
+    grad_t = torch.autograd.grad(
+        outputs=V_scalar.sum(),
+        inputs=t_norm,
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True,
+    )[0]
+
+    V_t = grad_t.reshape(-1)
+
+    quadratic_control_term = 0.5 * torch.sum(
+        grad_q * grad_q * R_inv_diag.view(1, -1),
+        dim=1,
+    )
+
+    residual_vec = V_t + running_cost - quadratic_control_term
+
+    residual_sq = residual_vec ** 2
+
+    if reduction == "mean":
+        loss = residual_sq.mean()
+    elif reduction == "sum":
+        loss = residual_sq.sum()
+    elif reduction == "none":
+        loss = residual_sq
+    else:
+        raise ValueError(
+            f"Unknown reduction='{reduction}'. Use 'mean', 'sum', or 'none'."
+        )
+
+    if return_residual:
+        return loss, residual_vec
+
+    return loss
+
+
+def hjb_residual(
+    V,
+    q,
+    t_norm,
+    running_cost,
+    R_inv_diag,
+    reduction="mean",
+    return_residual=False,
+):
+    """
+    HJB residual loss for kinematic optimal control.
+
+    Assumes control cost:
+
+        0.5 * u^T R u
+
+    and optimal control:
+
+        u* = -R^{-1} grad_q V
+
+    HJB residual:
+
+        V_t + running_cost - 0.5 * grad_q V^T R^{-1} grad_q V = 0
+
+    Args:
+        V:
+            Value function output, shape (batch, 1) or (batch,).
+
+        q:
+            Joint state tensor, shape (batch, 7), requires_grad=True.
+
+        t_norm:
+            Normalized time tensor, shape (batch, 1), requires_grad=True.
+            If t_norm = t / T, then V_t here is with respect to normalized time.
+
+        running_cost:
+            Per-sample running cost, shape (batch,) or (batch, 1).
+
+        R_inv_diag:
+            Diagonal inverse control-cost weights, shape (7,).
+
+        reduction:
+            "mean", "sum", or "none".
+
+        return_residual:
+            If True, return (loss, residual_vec).
+
+    Returns:
+        loss, or (loss, residual_vec)
+    """
+
+    if V.ndim == 2 and V.shape[1] == 1:
+        V_scalar = V[:, 0]
+    else:
+        V_scalar = V.reshape(-1)
+
+    running_cost = running_cost.reshape(-1)
+
+    if R_inv_diag.device != q.device:
+        R_inv_diag = R_inv_diag.to(q.device)
+
+    if R_inv_diag.dtype != q.dtype:
+        R_inv_diag = R_inv_diag.to(dtype=q.dtype)
+
+    grad_q = torch.autograd.grad(
+        outputs=V_scalar.sum(),
+        inputs=q,
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True,
+    )[0]
+
+    grad_t = torch.autograd.grad(
+        outputs=V_scalar.sum(),
+        inputs=t_norm,
+        create_graph=True,
+        retain_graph=True,
+        only_inputs=True,
+    )[0]
+
+    V_t = grad_t.reshape(-1)
+
+    quadratic_control_term = 0.5 * torch.sum(
+        grad_q * grad_q * R_inv_diag.view(1, -1),
+        dim=1,
+    )
+
+    residual_vec = V_t + running_cost - quadratic_control_term
+
+    residual_sq = residual_vec ** 2
+
+    if reduction == "mean":
+        loss = residual_sq.mean()
+    elif reduction == "sum":
+        loss = residual_sq.sum()
+    elif reduction == "none":
+        loss = residual_sq
+    else:
+        raise ValueError(
+            f"Unknown reduction='{reduction}'. Use 'mean', 'sum', or 'none'."
+        )
+
+    if return_residual:
+        return loss, residual_vec
+
+    return loss

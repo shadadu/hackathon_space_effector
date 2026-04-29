@@ -165,12 +165,12 @@ def main_():
 
     print(f"device: {device}")
 
-    Qp = float(rospy.get_param("~Qp", 10.0))
+    Qp = float(rospy.get_param("~Qp", 1.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
-    Cj = float(rospy.get_param("~Cj", 0.001))
-    Cv = float(rospy.get_param("~Cv", 0.001))
-    Ctr = float(rospy.get_param("~Ctr", 1000.0))
+    Cj = float(rospy.get_param("~Cj", 1e-5))
+    Cv = float(rospy.get_param("~Cv", 1e-4))
+    Ctr = float(rospy.get_param("~Ctr", 1.0))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
@@ -209,7 +209,7 @@ def main_():
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
     # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=8, input_dim=11, output_dim=1, hidden_size=192)
+    model = ValueNet(num_layers=16, input_dim=11, output_dim=1, hidden_size=192)
     # model = ValueNet_(num_layers=12, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=2)
 
     opt = optim.Adam(model.parameters(), lr=lr)
@@ -220,7 +220,7 @@ def main_():
     t_loss = 0.0
     t_loss_pde = 0.0
     t_loss_term = 0.0
-    itr = 10
+    itr = 50
 
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
     results_dir = "/Users/rckyi/Documents/GitHub/hackathon_space_effector/moveit_build/"
