@@ -33,37 +33,31 @@ class DGMLayer(nn.Module):
     """
     Georgias Detorakis (2024): Practical Aspects on Solving Differential Equations Using Deep Learning: A Primer
     """
+    def __init__(self, input_dim, hidden_dim):
+        super(DGMLayer, self).__init__()
+        # Standard fully connected layers used for the internal gates
+        self.Uz = nn.Linear(input_dim, hidden_dim)
+        self.Ug = nn.Linear(input_dim, hidden_dim)
+        self.Ur = nn.Linear(input_dim, hidden_dim)
+        self.Uh = nn.Linear(input_dim, hidden_dim)
 
-    def __init__(self, input_dim=1, hidden_size=50):
-        super().__init__()
+        self.Wz = nn.Linear(hidden_dim, hidden_dim)
+        self.Wg = nn.Linear(hidden_dim, hidden_dim)
+        self.Wr = nn.Linear(hidden_dim, hidden_dim)
+        self.Wh = nn.Linear(hidden_dim, hidden_dim)
 
-        self.Z_wg = nn.Linear(hidden_size, hidden_size)
-        self.Z_ug = nn.Linear(input_dim, hidden_size, bias=False)
+        self.activation = nn.Tanh()
 
-        self.G_wz = nn.Linear(hidden_size, hidden_size)
-        self.G_uz = nn.Linear(input_dim, hidden_size, bias=False)
+    def forward(self, x, S):
+        # x is the input coordinates (spatial/temporal)
+        # S is the output of the previous layer
+        z = self.activation(self.Uz(x) + self.Wz(S))
+        g = self.activation(self.Ug(x) + self.Wg(S))
+        r = self.activation(self.Ur(x) + self.Wr(S))
+        h = self.activation(self.Uh(x) + self.Wh(S * r))
 
-        self.R_wr = nn.Linear(hidden_size, hidden_size)
-        self.R_ur = nn.Linear(input_dim, hidden_size, bias=False)
-
-        self.H_wh = nn.Linear(hidden_size, hidden_size)
-        self.H_uh = nn.Linear(input_dim, hidden_size, bias=False)
-
-        # Non−linear Activation function
-        self.sigma = nn.Tanh()
-
-    def forward(self, x, s):
-        Z = self.sigma(self.Z_wg(s) + self.Z_ug(x))
-        # print(f"Z shape = {Z.shape}")
-        G = self.sigma(self.G_wz(Z) + self.G_uz(x))
-        # print(f"G shape = {G.shape}")
-        R = self.sigma(self.R_wr(G) + self.R_ur(x))
-        # print(f"R shape {R.shape} and s shape {s.shape} and I shape {self.H_wh(s).shape}")
-        H = self.sigma(self.H_wh(s) * R + self.H_uh(x))
-        # print(f"H shape {H.shape}")
-        out = (1 - G) * H + Z * self.H_wh(s)
-        # print(f"out shape {out.shape}")
-        return out
+        # Element-wise gate update
+        return (1 - g) * h + z * S
 
 
 class DGMLayer0(nn.Module):
@@ -100,23 +94,23 @@ class ValueNet(nn.Module):
     """
     dgm_layers = input_layer(DGMLayer0) + num_layers(hidden_dgm_layers) + output_layer (DGMLayerN)
     """
+    def __init__(self, input_dim, hidden_dim, num_layers, output_dim=1):
+        super(ValueNet, self).__init__()
+        self.initial_layer = nn.Linear(input_dim, hidden_dim)
+        self.dgm_layers = nn.ModuleList([
+            DGMLayer(input_dim, hidden_dim) for _ in range(num_layers)
+        ])
+        self.final_layer = nn.Linear(hidden_dim, output_dim)
 
-    def __init__(self, num_layers=1, input_dim=1, output_dim=1, hidden_size=50):
-        super().__init__()
+    def forward(self, x):
+        # Initial transformation
+        S = torch.tanh(self.initial_layer(x))
 
-        self.dropout = nn.Dropout(p=0.1)
+        # Pass through specialized DGM layers
+        for layer in self.dgm_layers:
+            S = layer(x, S)
 
-        self.layers = nn.ModuleList([DGMLayer0(input_dim, hidden_size)]) + \
-                      nn.ModuleList([DGMLayer(input_dim, hidden_size) for _ in range(num_layers)]) + \
-                      nn.ModuleList([DGMLayerN(input_dim, output_dim, hidden_size)])
-
-    def forward(self, x, s):
-        for i, layer in enumerate(self.layers):
-            # print(f"layer {i} = {layer}")
-            x = self.dropout(layer(s, x))
-
-        # print(f"out shape: {x.shape}")
-        return x.squeeze(-1)
+        return self.final_layer(S)
 
 
 class DGMLayer_(nn.Module):

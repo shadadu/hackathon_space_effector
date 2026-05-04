@@ -427,14 +427,16 @@ def main_():
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 4))
+    hidden_size = int(rospy.get_param("~hidden_size",256))
+    depth = int(rospy.get_param("~depth", 8))
+    input_dim = int(rospy.get_param("~input_dim",11))
 
     print(f"device: {device}")
 
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
-    Cj = float(rospy.get_param("~Cj", 0.01))
+    Cj = float(rospy.get_param("~Cj", 0.001))
     Cv = float(rospy.get_param("~Cv", 0.001))
     Ctr = float(rospy.get_param("~Ctr", 100.0))
 
@@ -488,24 +490,23 @@ def main_():
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
     # Model
-    model_type = rospy.get_param("~model_type", "ValueNet")
+    model_type = rospy.get_param("~model_type", "DGMValueNet")
 
     if model_type == "DGMValueNet":
         model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
     elif model_type == "ValueNet_":
         model = ValueNet_(
-            num_layers=8,
-            input_dim=11,
+            num_layers=depth,
+            input_dim=input_dim,
             output_dim=1,
-            hidden_size=192,
+            hidden_size=hidden,
             expansion_factor=1,
         ).to(device)
     else:
         model = ValueNet(
-            num_layers=8,
-            input_dim=11,
-            output_dim=1,
-            hidden_size=192,
+            input_dim=input_dim,
+            hidden_dim=hidden_size,
+            num_layers=depth
         ).to(device)
 
     opt = optim.Adam(model.parameters(), lr=lr)
@@ -516,7 +517,7 @@ def main_():
         jmax=jmax,
         T=T,
         batch_size=batch,
-        global_frac=float(rospy.get_param("~global_frac", 0.7)),
+        global_frac=float(rospy.get_param("~global_frac", 0.8)),
         buffer_size=int(rospy.get_param("~glf_buffer_size", 5000)),
         sigma_q=float(rospy.get_param("~glf_sigma_q", 0.08)),
         sigma_t=float(rospy.get_param("~glf_sigma_t", 0.10)),
@@ -617,10 +618,11 @@ def main_():
 
         # Your ValueNet currently appears to expect two identical inputs.
         # DGMValueNet may expect only one input depending on your implementation.
-        if model_type == "DGMValueNet":
-            V = model(x)
-        else:
-            V = model(x, x)
+        V = model(x)
+        # if model_type == "DGMValueNet":
+        #     V = model(x)
+        # else:
+        #     V = model(x, x)
 
         if use_velocity_loss:
             loss_pde, residual_vec = hjb_residual_(
@@ -673,11 +675,12 @@ def main_():
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
         xT = build_input(qT, tT, gT)
+        VT = model(xT)
 
-        if model_type == "DGMValueNet":
-            VT = model(xT)
-        else:
-            VT = model(xT, xT)
+        # if model_type == "DGMValueNet":
+        #     VT = model(xT)
+        # else:
+        #     VT = model(xT, xT)
 
         loss_term = terminal_loss(VT, phi)
 

@@ -82,9 +82,13 @@ def decode(code):
     return str(code)
 
 
-def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
-    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=16, input_dim=11, output_dim=1, hidden_size=192).to(device)
+def load_model(model_type: str, path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
+    if model_type == "DGMValueNet":
+        model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    elif model_type == "ValueNet":
+        model = ValueNet(input_dim=11, hidden_dim=hidden, num_layers=6).to(device)
+    else:
+        raise Exception("Type failure loading model")
     # model = ValueNet_(num_layers=12, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=2).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
     checkpoint = torch.load(str(path.resolve()))
@@ -223,6 +227,7 @@ class DGMPlannerService:
         # DGM model
         self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/objecttracking/models/panda_dgm_v1.pth")
         self.device = rospy.get_param("~device", "cpu")
+        self.model_type = rospy.get_param("~model_type", "DGMValueNet")
         self.model = None  # type: DGMValueNet
 
         # Rollout config
@@ -244,7 +249,7 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup ik proxy before init EE coordinates before init attempt = %s", get_ee_translation())
 
         hidden = int(rospy.get_param("~hidden", 256))
-        depth = int(rospy.get_param("~depth", 4))
+        depth = int(rospy.get_param("~depth", 8))
         mdl_path = "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
         path = Path(mdl_path)
         # Grant owner read/write, and others read (644)
@@ -252,7 +257,7 @@ class DGMPlannerService:
         rospy.loginfo(f"path is a file {path.is_file()}")
         rospy.loginfo(f"path is accessible {os.access(path, os.X_OK)}")
         if Path.exists(path):
-            self.model = load_model(path=path, hidden=hidden, depth=depth, lr=3e-4, device=self.device)
+            self.model = load_model(model_type="ValueNet", path=path, hidden=hidden, depth=depth, lr=3e-4, device=self.device)
             rospy.loginfo("Loaded DGM model: %s", mdl_path)
         else:
             # rospy.loginfo(f"File path exists? {os.path.exists()}")
