@@ -256,7 +256,7 @@ start_dgm_service() {
   if ! ros_exec "$container" "[ -f '$model_path' ]"; then
     warn "DGM model missing. Running short pretrain..."
     ros_bg_exec "$container" "/root/start_logs/dgm_pretrain.log" \
-      "rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=20 _batch:=192"
+      "rosrun object_tracking dgm_pretrain_.py _T:=2.0 _iters:=20 _batch:=192"
 
     local start
     start="$(date +%s)"
