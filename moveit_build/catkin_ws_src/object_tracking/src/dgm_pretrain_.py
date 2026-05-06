@@ -11,8 +11,8 @@ import torch.optim as optim
 from moveit_commander import MoveGroupCommander
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
-from object_tracking.dgm_model import ValueNet, ValueNet_, DGMValueNet, build_input, save_checkpoint
-from object_tracking.hjb_loss import terminal_loss, hjb_residual, hjb_residual_
+from object_tracking.dgm_model import ValueNet, ValueNet_, DGMValueNet, ResNet1D, build_input, save_checkpoint
+from object_tracking.hjb_loss import terminal_loss, terminal_position_cost, hjb_residual, hjb_residual_
 from object_tracking.fk_client import FKClient
 
 from dgm_planner_node import (
@@ -428,17 +428,19 @@ def main_():
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
     hidden_size = int(rospy.get_param("~hidden_size",256))
-    depth = int(rospy.get_param("~depth", 8))
+    depth = int(rospy.get_param("~depth", 6))
     input_dim = int(rospy.get_param("~input_dim",11))
+
 
     print(f"device: {device}")
 
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
-    Cj = float(rospy.get_param("~Cj", 0.001))
-    Cv = float(rospy.get_param("~Cv", 0.001))
-    Ctr = float(rospy.get_param("~Ctr", 100.0))
+    Cj = float(rospy.get_param("~Cj", 0.01))
+    Cv = float(rospy.get_param("~Cv", 0.0001))
+    Ctr = float(rospy.get_param("~Ctr", 1000.0))
+    CT = float(rospy.get_param("~CT",100.0))
 
     use_velocity_loss = bool(rospy.get_param("~use_velocity_loss", False))
 
@@ -502,6 +504,8 @@ def main_():
             hidden_size=hidden,
             expansion_factor=1,
         ).to(device)
+    elif model_type == "ResNet":
+        model = ResNet1D(input_channels=11, out_channels=192, num_layers=4, num_classes=192).to(device)
     else:
         model = ValueNet(
             input_dim=input_dim,
@@ -534,6 +538,7 @@ def main_():
     t_loss = 0.0
     t_loss_pde = 0.0
     t_loss_term = 0.0
+    t_loss_pos_term = 0.0
 
     log_every = int(rospy.get_param("~log_every", 10))
 
@@ -594,7 +599,7 @@ def main_():
                 batch_size=batch,
             )
 
-        # Running cost
+        # Running (position) cost
         pos_cost_np = compute_position_cost(
             fk=fk,
             joint_names=joint_names,
@@ -615,14 +620,8 @@ def main_():
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
         x = build_input(q, t, g)
-
-        # Your ValueNet currently appears to expect two identical inputs.
-        # DGMValueNet may expect only one input depending on your implementation.
+        # rospy.loginfo("Shape of input x=%s", x.shape)
         V = model(x)
-        # if model_type == "DGMValueNet":
-        #     V = model(x)
-        # else:
-        #     V = model(x, x)
 
         if use_velocity_loss:
             loss_pde, residual_vec = hjb_residual_(
@@ -675,20 +674,21 @@ def main_():
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
         xT = build_input(qT, tT, gT)
+        # rospy.loginfo("Shape of input xT=%s", xT.shape)
         VT = model(xT)
 
-        # if model_type == "DGMValueNet":
-        #     VT = model(xT)
-        # else:
-        #     VT = model(xT, xT)
+        # rospy.loginfo("Shape of input xT=%s, VT=%s, phi=%s", xT.shape, VT.shape, phi.shape)
 
         loss_term = terminal_loss(VT, phi)
+        loss_pos_term = terminal_position_cost(phi)
 
-        loss = loss_pde + Ctr * loss_term
+        # loss = loss_pde + Ctr * loss_term
+
+        loss = loss_pde + CT * loss_pos_term
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 1.0)
         opt.step()
 
         # Update GLF buffer after the optimizer step.
@@ -701,7 +701,7 @@ def main_():
         )
 
         t_loss_pde += float(loss_pde.item())
-        t_loss_term += float(loss_term.item())
+        t_loss_pos_term += float(loss_pos_term.item())
         t_loss += float(loss.item())
 
         if it % log_every == 0:
@@ -711,9 +711,9 @@ def main_():
                     "buffer=%d global_frac=%.2f elapsed=%.1fs"
                 ),
                 it,
-                t_loss_pde / log_every,
-                t_loss_term / log_every,
-                t_loss / log_every,
+                t_loss_pde / (log_every*(batch + bt)),
+                t_loss_pos_term / (log_every*(batch + bt)),
+                t_loss / (log_every*(batch + bt)),
                 len(sampler.buffer),
                 sampler.global_frac,
                 time.time() - t0,
@@ -721,7 +721,7 @@ def main_():
 
             data_line = (f"{it}"
                          f",{float(t_loss_pde) / (log_every * (batch + bt))}"
-                         f",{float(t_loss_term) / (log_every * (batch + bt))}"
+                         f",{float(t_loss_pos_term) / (log_every * (batch + bt))}"
                          f",{float(t_loss) / (log_every * (batch + bt))}"
                          )
 
@@ -731,6 +731,7 @@ def main_():
             t_loss = 0.0
             t_loss_pde = 0.0
             t_loss_term = 0.0
+            t_loss_pos_term = 0.0
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 

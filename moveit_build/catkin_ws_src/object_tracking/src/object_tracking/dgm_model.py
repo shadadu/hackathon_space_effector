@@ -4,7 +4,6 @@ import torch.nn as nn
 from typing import Any
 import numpy as np
 
-
 class DGMValueNet(nn.Module):
     """
     Position-only value function V(q, t, gpos):
@@ -33,6 +32,7 @@ class DGMLayer(nn.Module):
     """
     Georgias Detorakis (2024): Practical Aspects on Solving Differential Equations Using Deep Learning: A Primer
     """
+
     def __init__(self, input_dim, hidden_dim):
         super(DGMLayer, self).__init__()
         # Standard fully connected layers used for the internal gates
@@ -69,9 +69,7 @@ class DGMLayer0(nn.Module):
 
     def forward(self, x, s):
         s1 = self.I_zu(s)
-        # print(f"s1 shape {s1.shape}")
         out = self.dgm_layer(x, s1)
-        # print(f"out shape {out.shape}")
         return out
 
 
@@ -94,6 +92,7 @@ class ValueNet(nn.Module):
     """
     dgm_layers = input_layer(DGMLayer0) + num_layers(hidden_dgm_layers) + output_layer (DGMLayerN)
     """
+
     def __init__(self, input_dim, hidden_dim, num_layers, output_dim=1):
         super(ValueNet, self).__init__()
         self.initial_layer = nn.Linear(input_dim, hidden_dim)
@@ -200,6 +199,73 @@ class ValueNet_(nn.Module):
         for i, layer in enumerate(self.layers):
             x = self.dropout(layer(s, x))
         return x.squeeze(-1)
+
+
+class ResBlock1D(nn.Module):
+    def __init__(self, in_channels, out_channels, stride=1):
+        super().__init__()
+        self.dgm = DGMValueNet(in_dim=48, hidden=192, depth=24)
+        self.conv1 = nn.Conv1d(in_channels, out_channels, kernel_size=3, stride=stride, padding=1, bias=False)
+        self.bn1 = nn.BatchNorm1d(out_channels)
+        self.relu = nn.ReLU(inplace=True)
+        self.conv2 = nn.Conv1d(out_channels, out_channels, kernel_size=3, padding=1, bias=False)
+        self.bn2 = nn.BatchNorm1d(out_channels)
+
+        # Shortcut to align dimensions for the skip connection
+        self.shortcut = nn.Sequential()
+        if stride != 1 or in_channels != out_channels:
+            self.shortcut = nn.Sequential(
+                nn.Conv1d(in_channels, out_channels, kernel_size=1, stride=stride, bias=False),
+                nn.BatchNorm1d(out_channels)
+            )
+
+    def forward(self, x):
+        x = self.dgm(x)
+        identity = self.shortcut(x)
+        out = self.relu(self.bn1(self.conv1(x)))
+        out = self.bn2(self.conv2(out))
+        out += identity
+        return self.relu(out)
+
+
+class ResNet1D(nn.Module):
+    def __init__(self, input_channels=11, out_channels=64, num_layers=16, num_classes=10, dim=16):
+        super().__init__()
+        # Initial stem: reduces temporal length from 192 -> 48
+        self.prep = nn.Sequential(
+            nn.Conv1d(input_channels, out_channels, kernel_size=7, stride=2, padding=3, bias=False),
+            nn.BatchNorm1d(out_channels),
+            nn.ReLU(inplace=True),
+            nn.MaxPool1d(kernel_size=3, stride=2, padding=1)
+        )
+        self.ln = nn.Conv1d(11, 256, kernel_size=1, stride=1, padding=1, bias=False)
+
+        self.layers = nn.ModuleList([ResBlock1D(out_channels, out_channels) for _ in range(num_layers)])
+
+        # Residual Layers
+        self.layer1 = ResBlock1D(out_channels, out_channels)
+        self.layer2 = ResBlock1D(out_channels, 128, stride=2)  # Length 48 -> 24
+
+        # Output head
+        self.avgpool = nn.AdaptiveAvgPool1d(1)
+        self.fc = nn.Linear(128, num_classes)
+
+    def forward(self, x):
+        a, b = x.shape
+
+        y = nn.Conv1d(a, 192, kernel_size=3, stride=1, padding=1, bias=False)(x)
+        c, d = y.shape
+        x = y.T.reshape([1, d, c])
+
+        x = self.prep(x)
+
+        for i, layer in enumerate(self.layers):
+            x = layer(x)
+
+        x = self.layer2(x)
+        x = self.avgpool(x).squeeze(-1)
+        x = nn.Linear(128, a)(x)
+        return x
 
 
 def build_input(q, t_norm, gpos):

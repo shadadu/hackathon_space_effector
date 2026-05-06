@@ -20,7 +20,7 @@ from sensor_msgs.msg import JointState
 # Optional Jacobian service hook
 from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
-from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_
+from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_, ResNet1D
 from trajectory_executor_manager import get_panda_start_pose, get_end_translation
 from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
@@ -83,10 +83,13 @@ def decode(code):
 
 
 def load_model(model_type: str, path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
+    model = None
     if model_type == "DGMValueNet":
         model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
     elif model_type == "ValueNet":
         model = ValueNet(input_dim=11, hidden_dim=hidden, num_layers=6).to(device)
+    elif model_type == "ResNet":
+        model = ResNet1D(input_channels=11, out_channels=192, num_layers=2, num_classes=192).to(device)
     else:
         raise Exception("Type failure loading model")
     # model = ValueNet_(num_layers=12, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=2).to(device)
@@ -249,7 +252,7 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup ik proxy before init EE coordinates before init attempt = %s", get_ee_translation())
 
         hidden = int(rospy.get_param("~hidden", 256))
-        depth = int(rospy.get_param("~depth", 8))
+        depth = int(rospy.get_param("~depth", 6))
         mdl_path = "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
         path = Path(mdl_path)
         # Grant owner read/write, and others read (644)
