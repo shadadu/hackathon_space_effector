@@ -272,6 +272,10 @@ def build_input(q, t_norm, gpos):
     # q: (B,7), t_norm: (B,1), gpos: (B,3)
     return torch.cat([q, t_norm, gpos], dim=-1)
 
+def build_input_(q0, q,  t0, t_norm, g0, gpos):
+    # q: (B,7), t_norm: (B,1), gpos: (B,3)
+    return torch.cat([q0, q, t0, t_norm, g0, gpos], dim=-1)
+
 
 def save_checkpoint(path, model, meta: dict):
     ckpt = {

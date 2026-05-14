@@ -11,15 +11,14 @@ import torch.optim as optim
 from moveit_commander import MoveGroupCommander
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
-from object_tracking.dgm_model import ValueNet, ValueNet_, DGMValueNet, ResNet1D, build_input, save_checkpoint
-from object_tracking.hjb_loss import terminal_loss, terminal_position_cost, hjb_residual, hjb_residual_
+from object_tracking.dgm_model import ValueNet, ValueNet_, DGMValueNet, ResNet1D, build_input, build_input_, save_checkpoint
+from object_tracking.hjb_loss import terminal_loss, terminal_position_cost, hjb_residual, hjb_residual_, initial_condition_cost
 from object_tracking.fk_client import FKClient
 
 from dgm_planner_node import (
     validate_with_moveit_state_validity,
     robot_state_from_q,
 )
-
 
 """
 DGM / HJB pretraining for Panda arm.
@@ -137,12 +136,12 @@ def is_state_valid(svc, active_joints, q_row, group_name):
 
 
 def filter_valid_qtg(
-    svc,
-    active_joints,
-    group_name,
-    q_np,
-    t_np,
-    g_np,
+        svc,
+        active_joints,
+        group_name,
+        q_np,
+        t_np,
+        g_np,
 ):
     """
     Keep only samples whose q state is valid in MoveIt.
@@ -193,17 +192,17 @@ class GLFSampler:
     """
 
     def __init__(
-        self,
-        jmin,
-        jmax,
-        T,
-        batch_size,
-        global_frac=0.7,
-        buffer_size=5000,
-        sigma_q=0.08,
-        sigma_t=0.10,
-        sigma_g=0.03,
-        local_score_sharpness=5.0,
+            self,
+            jmin,
+            jmax,
+            T,
+            batch_size,
+            global_frac=0.7,
+            buffer_size=5000,
+            sigma_q=0.08,
+            sigma_t=0.10,
+            sigma_g=0.03,
+            local_score_sharpness=5.0,
     ):
         self.jmin = np.asarray(jmin, dtype=np.float64)
         self.jmax = np.asarray(jmax, dtype=np.float64)
@@ -223,7 +222,9 @@ class GLFSampler:
 
     def sample_global(self, n):
         q = np.random.uniform(self.jmin, self.jmax, (n, 7)).astype(np.float64)
-        t = np.random.uniform(0.0, self.T, (n, 1)).astype(np.float64)
+        t_npi = np.random.uniform(0.0, self.T, (n, 1)).astype(np.float64)
+        t = np.sort(t_npi.flatten()).reshape((n, 1))
+        # t = np.random.uniform(0.0, self.T, (n, 1)).astype(np.float64)
         g = sample_goals(n)
         return q, t, g
 
@@ -318,13 +319,13 @@ class GLFSampler:
         return q, t, g
 
     def sample_valid_batch(
-        self,
-        svc,
-        active_joints,
-        group_name,
-        batch_size=None,
-        max_attempt_factor=25,
-        candidate_multiplier=2,
+            self,
+            svc,
+            active_joints,
+            group_name,
+            batch_size=None,
+            max_attempt_factor=25,
+            candidate_multiplier=2,
     ):
         """
         Generate a GLF mixed batch and reject invalid MoveIt states.
@@ -427,10 +428,9 @@ def main_():
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
-    hidden_size = int(rospy.get_param("~hidden_size",256))
+    hidden_size = int(rospy.get_param("~hidden_size", 256))
     depth = int(rospy.get_param("~depth", 6))
-    input_dim = int(rospy.get_param("~input_dim",11))
-
+    input_dim = int(rospy.get_param("~input_dim", 11))
 
     print(f"device: {device}")
 
@@ -439,8 +439,12 @@ def main_():
 
     Cj = float(rospy.get_param("~Cj", 0.01))
     Cv = float(rospy.get_param("~Cv", 0.0001))
-    Ctr = float(rospy.get_param("~Ctr", 1000.0))
-    CT = float(rospy.get_param("~CT",100.0))
+    Ctr = float(rospy.get_param("~Ctr", 10.0))
+    CT = float(rospy.get_param("~CT", 100.0))
+
+    lambda_ic = float(rospy.get_param("~lambda_ic", 10.0))
+    lambda_tc = float(rospy.get_param("~lambda_tc", 50.0))
+    lambda_residual = float(rospy.get_param("~lambda_residual", 100))
 
     use_velocity_loss = bool(rospy.get_param("~use_velocity_loss", False))
 
@@ -538,7 +542,7 @@ def main_():
     t_loss = 0.0
     t_loss_pde = 0.0
     t_loss_term = 0.0
-    t_loss_pos_term = 0.0
+    t_loss_ic_pos_term = 0.0
 
     log_every = int(rospy.get_param("~log_every", 10))
 
@@ -547,11 +551,11 @@ def main_():
     results_file = now + ".csv"
 
     results_preamble = (
-        str(model)
-        + "\n"
-        + f"lr:{lr}\n"
-        + f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr}\n"
-        + f"global_frac:{sampler.global_frac},buffer_size:{sampler.buffer_size}"
+            str(model)
+            + "\n"
+            + f"lr:{lr}\n"
+            + f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr}\n"
+            + f"global_frac:{sampler.global_frac},buffer_size:{sampler.buffer_size}"
     )
 
     print(f"results_file {results_file}\n\nresults_preamble {results_preamble}")
@@ -563,6 +567,8 @@ def main_():
         f.write(results_preamble)
 
     for it in range(1, iters + 1):
+
+        bt = max(64, batch // 3)
         # During warmup, force mostly global sampling.
         original_global_frac = sampler.global_frac
         if it <= glf_warmup_iters:
@@ -574,6 +580,10 @@ def main_():
             group_name=group_name,
             batch_size=batch,
         )
+
+        t_np = np.random.uniform(0, T, (batch, 1)).astype(np.float64)
+        t_np = np.sort(t_np.flatten()).reshape((batch, 1))
+
 
         sampler.global_frac = original_global_frac
 
@@ -615,16 +625,40 @@ def main_():
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
 
         q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
-        t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
+        # t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
+        t = torch.from_numpy(t_np / T).to(torch.float32).to(device).requires_grad_()
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
-        x = build_input(q, t, g)
-        # rospy.loginfo("Shape of input x=%s", x.shape)
+        # --------------------------------------------------------
+        # Initial Conditions (IC)
+        # --------------------------------------------------------
+        bts = max(8, batch // 32)
+        q0_np = np.repeat([q_np[0]], bts, axis=0)  # shape (bts,7,)
+        q0 = torch.from_numpy(q0_np).to(dtype=torch.float32).to(device=device)
+        t0 = torch.zeros((bts, 1), dtype=torch.float32, device=device, requires_grad=True)
+        g0_np = np.repeat([g_np[0]], bts, axis=0)
+        g0 = torch.from_numpy(g0_np).to(dtype=torch.float32).to(device=device)
+        l0_np = np.repeat([l_np[0]], bts, axis=0)
+        l0 = torch.from_numpy(l0_np).to(dtype=torch.float32).to(device=device)
+
+
+        #
+        # rospy.loginfo("Shape of running input q=%s, t=%s, g=%s, l=%s", q.shape, t.shape, g.shape, l.shape)
+        # rospy.loginfo("Shape of running input q=%s, t=%s, g=%s, l=%s", q.shape, t_np.shape, g.shape, l.shape)
+        # rospy.loginfo("Shape of IC input q0=%s, t0=%s, g0=%s, phi0=%s", q0.shape, t0.shape, g0.shape, l0.shape)
+
+        x = build_input(torch.cat([q0, q]), torch.cat([t0, t]), torch.cat([g0, g]))
+        # xi = build_input(q, t, g)
+
+        rospy.loginfo("Shape of input x=%s", x.shape)
+
+        # x = build_input(q, t, g)
+
         V = model(x)
 
         if use_velocity_loss:
-            loss_pde, residual_vec = hjb_residual_(
+            loss_pde, residual_vec, u_ic, u_tc = hjb_residual_(
                 V=V,
                 q=q,
                 t_norm=t,
@@ -636,7 +670,7 @@ def main_():
                 return_residual=True,
             )
         else:
-            loss_pde, residual_vec = hjb_residual(
+            loss_pde, residual_vec, u_ic, u_tc = hjb_residual(
                 V=V,
                 q=q,
                 t_norm=t,
@@ -648,8 +682,15 @@ def main_():
 
         residual_scores_np = residual_vec.detach().abs().cpu().numpy()
 
+        # u_star_np = u_star.detach().abs().cpu().numpy()
+        rospy.loginfo("u_ic=%s, u_tc=%s, R_diag shape=%s",  u_ic, u_tc, R_diag.shape)
+
+
+        # --------------------------------------------------------
+        # Terminal Conditions (TC)
+        # --------------------------------------------------------
         # Terminal batch
-        bt = max(64, batch // 3)
+
 
         qT_np, tT_phys_np, gT_np = sampler.sample_valid_batch(
             svc=validity_svc,
@@ -659,7 +700,7 @@ def main_():
         )
 
         # Terminal time is fixed to normalized 1.0.
-        phi_np = compute_position_cost(
+        phiT_np = compute_position_cost(
             fk=fk,
             joint_names=joint_names,
             q_np=qT_np,
@@ -669,22 +710,61 @@ def main_():
         )
 
         qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
+        # tT_npi = np.random.uniform(T, T * 1.3, (bt, 1)).astype(np.float64)
+        # tT_np = np.sort(tT_npi.flatten()).reshape((bt, 1))
+        # tT = torch.from_numpy(tT_np).to(torch.float32).to(device).requires_grad_()
         tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
-        phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
+        phiT = torch.tensor(phiT_np, dtype=torch.float32, device=device)
 
-        xT = build_input(qT, tT, gT)
+        xT = build_input(torch.cat([q0, q]), torch.cat([t0, t]), torch.cat([g0, g]))
+        # xiT = build_input(q, t, g)
+
+        rospy.loginfo("Shape of input x=%s", xT.shape)
+
+        # xT = build_input(qT, tT, gT)
         # rospy.loginfo("Shape of input xT=%s", xT.shape)
         VT = model(xT)
 
-        # rospy.loginfo("Shape of input xT=%s, VT=%s, phi=%s", xT.shape, VT.shape, phi.shape)
+        # loss_term = terminal_loss(VT, phiT)
+        loss_tc_position = terminal_position_cost(phiT)
+        loss_tc_velocity = terminal_position_cost(u_tc)
 
-        loss_term = terminal_loss(VT, phi)
-        loss_pos_term = terminal_position_cost(phi)
+        # # --------------------------------------------------------
+        # # Initial Conditions (IC)
+        # # --------------------------------------------------------
+        # bts = max(8, batch // 32)
+        # q0_np = np.repeat([q_np[0]], bts, axis=0)  # shape (bts,7,)
+        # q0 = torch.from_numpy(q0_np).to(dtype=torch.float32).to(device=device)
+        # # tT_npi = np.random.uniform(T, T * 1.3, (bt, 1)).astype(np.float64)
+        # # tT_np = np.sort(tT_npi.flatten()).reshape((bt, 1))
+        # # tT = torch.from_numpy(tT_np).to(torch.float32).to(device).requires_grad_()
+        # t0 = torch.zeros((bts, 1), dtype=torch.float32, device=device, requires_grad=True)
+        # g0_np = np.repeat([gT_np[0]], bts, axis=0)
+        # g0 = torch.from_numpy(g0_np).to(dtype=torch.float32).to(device=device)
+        # phi0_np = np.repeat([phiT_np[0]], bts, axis=0)
+        # phi0 = torch.from_numpy(phi0_np).to(dtype=torch.float32).to(device=device)
+        #
+        # rospy.loginfo("Shape of running input q=%s, t=%s, g=%s, l=%s", q.shape, t, g.shape, l.shape)
+        # rospy.loginfo("Shape of IC input q0=%s, t0=%s, g0=%s, phi0=%s", q0.shape, t0, g0.shape, phi0.shape)
+        # rospy.loginfo("Shape of TC input qT=%s, tT=%s, gT=%s, phiT=%s", qT.shape, tT, gT.shape, phiT.shape)
+        # rospy.loginfo("Shape of IC input q0=%s, t0=%s, g0=%s, phi0=%s", q0.shape, t0.shape, g0.shape, phi0.shape)
+
+        # xi = build_input(torch.cat([q0, q]), torch.cat([t0, t]), torch.cat([g0, g]))
+        # xi = build_input(q, t, g)
+
+        # rospy.loginfo("Shape of input x=%s", xi.shape)
+
+        loss_ic_pos_term = initial_condition_cost(l0)
+        loss_ic_velocity_term = initial_condition_cost(u_ic)
+
 
         # loss = loss_pde + Ctr * loss_term
 
-        loss = loss_pde + CT * loss_pos_term
+        # loss = loss_pde + CT * loss_tc_position
+
+        loss = lambda_ic * (loss_ic_pos_term + loss_ic_velocity_term) + lambda_tc * (loss_tc_position + loss_tc_velocity) +\
+            lambda_residual * loss_pde
 
         opt.zero_grad(set_to_none=True)
         loss.backward()
@@ -701,27 +781,41 @@ def main_():
         )
 
         t_loss_pde += float(loss_pde.item())
-        t_loss_pos_term += float(loss_pos_term.item())
+        t_loss_ic_pos_term += float(loss_ic_pos_term.item())
         t_loss += float(loss.item())
 
         if it % log_every == 0:
             rospy.loginfo(
                 (
                     "iter=%d pde=%.6f term=%.6f loss=%.6f "
-                    "buffer=%d global_frac=%.2f elapsed=%.1fs"
+                    # "buffer=%d global_frac=%.2f elapsed=%.1fs"
                 ),
                 it,
-                t_loss_pde / (log_every*(batch + bt)),
-                t_loss_pos_term / (log_every*(batch + bt)),
-                t_loss / (log_every*(batch + bt)),
-                len(sampler.buffer),
-                sampler.global_frac,
-                time.time() - t0,
+                t_loss_pde / (log_every * (batch + bt)),
+                t_loss_ic_pos_term / (log_every * (batch + bt)),
+                t_loss / (log_every * (batch + bt)),
+                # len(sampler.buffer),
+                # sampler.global_frac,
+                # time.time() - t0,
             )
+
+            # rospy.loginfo(
+            #     (
+            #         "iter=%d pde=%.6f term=%.6f loss=%.6f "
+            #         "buffer=%d global_frac=%.2f elapsed=%.1fs"
+            #     ),
+            #     it,
+            #     t_loss_pde / (log_every * (batch + bt)),
+            #     t_loss_pos_term / (log_every * (batch + bt)),
+            #     t_loss / (log_every * (batch + bt)),
+            #     len(sampler.buffer),
+            #     sampler.global_frac,
+            #     time.time() - t0,
+            # )
 
             data_line = (f"{it}"
                          f",{float(t_loss_pde) / (log_every * (batch + bt))}"
-                         f",{float(t_loss_pos_term) / (log_every * (batch + bt))}"
+                         f",{float(t_loss_ic_pos_term) / (log_every * (batch + bt))}"
                          f",{float(t_loss) / (log_every * (batch + bt))}"
                          )
 
@@ -730,8 +824,7 @@ def main_():
 
             t_loss = 0.0
             t_loss_pde = 0.0
-            t_loss_term = 0.0
-            t_loss_pos_term = 0.0
+            t_loss_ic_pos_term = 0.0
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 

@@ -278,7 +278,8 @@ def main_():
                 jmax=jmax,
                 batch_size=batch,
             )
-        t_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+        t_npi = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+        t_np = np.sort(t_npi.flatten()).reshape((batch,1))
         g_np = sample_goals(batch)
 
         pos_cost_np = np.zeros((batch,), dtype=np.float64)
@@ -311,7 +312,7 @@ def main_():
         # )
 
         #
-        loss_pde = hjb_residual_loss_(
+        loss_pde, ctrl_vel = hjb_residual_loss_(
             V=V,
             q=q,
             t=t,
@@ -347,7 +348,11 @@ def main_():
                 phi_np[i] = 1e3
 
         qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
-        tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
+
+        tT_npi = np.random.uniform(T, T*1.3, (bt, 1)).astype(np.float64)
+        tT_np = np.sort(tT_npi.flatten()).reshape((bt, 1))
+        tT = torch.from_numpy(tT_np).to(device).requires_grad_()
+        # tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 

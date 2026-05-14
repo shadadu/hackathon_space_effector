@@ -19,14 +19,16 @@ def hjb_residual_loss(V, q, t_norm, running_cost, R_inv_diag):
     #               DeepPAAC and Aladi DGM Extension papers?
 
     resid = V_t + running_cost - 0.25 * quad
-    return (resid ** 2).mean()
+    control_velocity = - 0.25 * quad
+    return (resid ** 2).mean(), control_velocity
 
-def terminal_loss(V_T, phi_T):
-    """
-    V_T: (B,)
-    phi_T: (B,)
-    """
-    return ((V_T - phi_T) ** 2).mean()
+
+# def terminal_loss(V_T, phi_T):
+#     """
+#     V_T: (B,)
+#     phi_T: (B,)
+#     """
+#     return ((V_T - phi_T) ** 2).mean()
 
 
 def dist_term(value, min_limit, max_limit):
@@ -43,9 +45,27 @@ def terminal_loss(VT, phi):
     phi = phi.reshape(-1)
     return torch.mean((VT - phi) ** 2)
 
+
 def terminal_position_cost(phi):
     phi = phi.reshape(-1)
-    return (torch.mean(phi))**2
+    return (torch.mean(phi)) ** 2
+
+def initial_condition_cost(item):
+    item = item.reshape(-1)
+    return (torch.mean(item)) ** 2
+
+def time_monotonicity_cost(t):
+    s = 0
+    i = 0
+    for _ in range(0, len(t) - 1):
+        diff = t[i + 1] - t[i]
+        if diff >= 0:
+            s += 0
+        else:
+            s += 1
+        i += 1
+    return s
+
 
 def hjb_residual_loss_(V, q, t, running_cost, R_inv_diag, vel_limits, Cv=0.0, T=1.0):
     """
@@ -119,17 +139,17 @@ def hjb_residual_loss_(V, q, t, running_cost, R_inv_diag, vel_limits, Cv=0.0, T=
     # dV/dt + l(q,u*) + gradV·u* = 0
     residual = dV_dt + total_running_cost + drift_term
 
-    return torch.mean(residual ** 2)
+    return torch.mean(residual ** 2), u_star
 
 
 def hjb_residual_(
-    V,
-    q,
-    t_norm,
-    running_cost,
-    R_inv_diag,
-    reduction="mean",
-    return_residual=False,
+        V,
+        q,
+        t_norm,
+        running_cost,
+        R_inv_diag,
+        reduction="mean",
+        return_residual=False,
 ):
     """
     HJB residual loss for kinematic optimal control.
@@ -225,19 +245,19 @@ def hjb_residual_(
         )
 
     if return_residual:
-        return loss, residual_vec
+        return loss, residual_vec, -quadratic_control_term
 
-    return loss
+    return loss, -quadratic_control_term
 
 
 def hjb_residual(
-    V,
-    q,
-    t_norm,
-    running_cost,
-    R_inv_diag,
-    reduction="mean",
-    return_residual=False,
+        V,
+        q,
+        t_norm,
+        running_cost,
+        R_inv_diag,
+        reduction="mean",
+        return_residual=False,
 ):
     """
     HJB residual loss for kinematic optimal control.
@@ -302,6 +322,9 @@ def hjb_residual(
         only_inputs=True,
     )[0]
 
+    # grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]
+
+
     grad_t = torch.autograd.grad(
         outputs=V_scalar.sum(),
         inputs=t_norm,
@@ -309,6 +332,8 @@ def hjb_residual(
         retain_graph=True,
         only_inputs=True,
     )[0]
+
+    print(f"grad_q, grad_t, R_inv_diag shape: {grad_q.shape} {grad_t.shape} {R_inv_diag.shape}")
 
     V_t = grad_t.reshape(-1)
 
@@ -332,7 +357,10 @@ def hjb_residual(
             f"Unknown reduction='{reduction}'. Use 'mean', 'sum', or 'none'."
         )
 
-    if return_residual:
-        return loss, residual_vec
+    u_ic = -torch.mean((0.5 * grad_q * grad_q * R_inv_diag.view(1, -1))[0:3], dim=0)
+    u_tc = -torch.mean((0.5 * grad_q * grad_q * R_inv_diag.view(1,-1))[:-8], dim=0)
 
-    return loss
+    if return_residual:
+        return loss, residual_vec, u_ic, u_tc
+
+    return loss, u_ic, u_tc
