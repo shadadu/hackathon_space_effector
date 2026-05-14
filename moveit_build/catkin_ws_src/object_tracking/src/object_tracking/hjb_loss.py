@@ -50,9 +50,11 @@ def terminal_position_cost(phi):
     phi = phi.reshape(-1)
     return (torch.mean(phi)) ** 2
 
+
 def initial_condition_cost(item):
     item = item.reshape(-1)
     return (torch.mean(item)) ** 2
+
 
 def time_monotonicity_cost(t):
     s = 0
@@ -322,9 +324,6 @@ def hjb_residual(
         only_inputs=True,
     )[0]
 
-    # grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]
-
-
     grad_t = torch.autograd.grad(
         outputs=V_scalar.sum(),
         inputs=t_norm,
@@ -332,8 +331,6 @@ def hjb_residual(
         retain_graph=True,
         only_inputs=True,
     )[0]
-
-    print(f"grad_q, grad_t, R_inv_diag shape: {grad_q.shape} {grad_t.shape} {R_inv_diag.shape}")
 
     V_t = grad_t.reshape(-1)
 
@@ -358,7 +355,7 @@ def hjb_residual(
         )
 
     u_ic = -torch.mean((0.5 * grad_q * grad_q * R_inv_diag.view(1, -1))[0:3], dim=0)
-    u_tc = -torch.mean((0.5 * grad_q * grad_q * R_inv_diag.view(1,-1))[:-8], dim=0)
+    u_tc = -torch.mean((0.5 * grad_q * grad_q * R_inv_diag.view(1, -1))[:-8], dim=0)
 
     if return_residual:
         return loss, residual_vec, u_ic, u_tc
