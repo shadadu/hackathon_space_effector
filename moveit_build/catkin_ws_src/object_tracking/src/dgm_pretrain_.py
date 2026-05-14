@@ -442,9 +442,9 @@ def main_():
     Ctr = float(rospy.get_param("~Ctr", 10.0))
     CT = float(rospy.get_param("~CT", 100.0))
 
-    lambda_ic = float(rospy.get_param("~lambda_ic", 10.0))
-    lambda_tc = float(rospy.get_param("~lambda_tc", 50.0))
-    lambda_residual = float(rospy.get_param("~lambda_residual", 100))
+    lambda_ic = float(rospy.get_param("~lambda_ic", 1.0))
+    lambda_tc = float(rospy.get_param("~lambda_tc", 2.0))
+    lambda_residual = float(rospy.get_param("~lambda_residual", 50))
 
     use_velocity_loss = bool(rospy.get_param("~use_velocity_loss", False))
 
@@ -455,7 +455,7 @@ def main_():
     )
     R_inv_diag = 1.0 / R_diag
 
-    print(f"R_diag {R_diag}")
+    # print(f"R_diag {R_diag}")
 
     vel_limits_np = np.array(
         rospy.get_param("~vel_limits", [2.0] * 7),
@@ -542,9 +542,9 @@ def main_():
     t_loss = 0.0
     t_loss_pde = 0.0
     t_loss_term = 0.0
-    t_loss_ic_pos_term = 0.0
+    t_loss_ic_velocity = 0.0
 
-    log_every = int(rospy.get_param("~log_every", 10))
+    log_every = int(rospy.get_param("~log_every", 100))
 
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
 
@@ -583,7 +583,6 @@ def main_():
 
         t_np = np.random.uniform(0, T, (batch, 1)).astype(np.float64)
         t_np = np.sort(t_np.flatten()).reshape((batch, 1))
-
 
         sampler.global_frac = original_global_frac
 
@@ -651,7 +650,7 @@ def main_():
         x = build_input(torch.cat([q0, q]), torch.cat([t0, t]), torch.cat([g0, g]))
         # xi = build_input(q, t, g)
 
-        rospy.loginfo("Shape of input x=%s", x.shape)
+        # rospy.loginfo("Shape of input x=%s", x.shape)
 
         # x = build_input(q, t, g)
 
@@ -683,7 +682,7 @@ def main_():
         residual_scores_np = residual_vec.detach().abs().cpu().numpy()
 
         # u_star_np = u_star.detach().abs().cpu().numpy()
-        rospy.loginfo("u_ic=%s, u_tc=%s, R_diag shape=%s",  u_ic, u_tc, R_diag.shape)
+        # rospy.loginfo("u_ic=%s, u_tc=%s, R_diag shape=%s",  u_ic, u_tc, R_diag.shape)
 
 
         # --------------------------------------------------------
@@ -720,7 +719,7 @@ def main_():
         xT = build_input(torch.cat([q0, q]), torch.cat([t0, t]), torch.cat([g0, g]))
         # xiT = build_input(q, t, g)
 
-        rospy.loginfo("Shape of input x=%s", xT.shape)
+        # rospy.loginfo("Shape of input x=%s", xT.shape)
 
         # xT = build_input(qT, tT, gT)
         # rospy.loginfo("Shape of input xT=%s", xT.shape)
@@ -755,7 +754,7 @@ def main_():
 
         # rospy.loginfo("Shape of input x=%s", xi.shape)
 
-        loss_ic_pos_term = initial_condition_cost(l0)
+        # loss_ic_pos_term = initial_condition_cost(l0)
         loss_ic_velocity_term = initial_condition_cost(u_ic)
 
 
@@ -763,7 +762,7 @@ def main_():
 
         # loss = loss_pde + CT * loss_tc_position
 
-        loss = lambda_ic * (loss_ic_pos_term + loss_ic_velocity_term) + lambda_tc * (loss_tc_position + loss_tc_velocity) +\
+        loss = lambda_ic * loss_ic_velocity_term + lambda_tc * (5.0*loss_tc_position + loss_tc_velocity) +\
             lambda_residual * loss_pde
 
         opt.zero_grad(set_to_none=True)
@@ -781,7 +780,7 @@ def main_():
         )
 
         t_loss_pde += float(loss_pde.item())
-        t_loss_ic_pos_term += float(loss_ic_pos_term.item())
+        t_loss_ic_velocity += float(loss_ic_velocity_term.item())
         t_loss += float(loss.item())
 
         if it % log_every == 0:
@@ -792,7 +791,7 @@ def main_():
                 ),
                 it,
                 t_loss_pde / (log_every * (batch + bt)),
-                t_loss_ic_pos_term / (log_every * (batch + bt)),
+                t_loss_ic_velocity / (log_every * (batch + bt)),
                 t_loss / (log_every * (batch + bt)),
                 # len(sampler.buffer),
                 # sampler.global_frac,
@@ -814,9 +813,9 @@ def main_():
             # )
 
             data_line = (f"{it}"
-                         f",{float(t_loss_pde) / (log_every * (batch + bt))}"
-                         f",{float(t_loss_ic_pos_term) / (log_every * (batch + bt))}"
-                         f",{float(t_loss) / (log_every * (batch + bt))}"
+                         f",{float(t_loss_pde) / (log_every * (bts + batch + bt))}"
+                         f",{float(t_loss_ic_velocity) / (log_every * (bts + batch + bt))}"
+                         f",{float(t_loss) / (log_every * (bts + batch + bt))}"
                          )
 
             with open(train_perf_data_path, "a") as f:
@@ -824,7 +823,7 @@ def main_():
 
             t_loss = 0.0
             t_loss_pde = 0.0
-            t_loss_ic_pos_term = 0.0
+            t_loss_ic_velocity = 0.0
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
 
