@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import math
 import os
 import time
 import numpy as np
@@ -10,7 +11,7 @@ from moveit_commander import MoveGroupCommander
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_, build_input, save_checkpoint
-from object_tracking.hjb_loss import hjb_residual_loss, hjb_residual_loss_, terminal_loss
+from object_tracking.hjb_loss import hjb_residual_loss, hjb_residual_loss_, terminal_loss, terminal_loss_
 from object_tracking.fk_client import FKClient
 from datetime import datetime
 
@@ -161,17 +162,18 @@ def main_():
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 4))
+    depth = int(rospy.get_param("~depth", 8))
 
     print(f"device: {device}")
 
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
-    Cj = float(rospy.get_param("~Cj", 0.1))
-    Cv = float(rospy.get_param("~Cv", 0.001))
-    Ctr = float(rospy.get_param("~Ctr", 100.0))
-    Cpd = float(rospy.get_param("~Cpd", 0.001))
+    Cj = float(rospy.get_param("~Cj", 0.0))
+    Cv = float(rospy.get_param("~Cv", 0.0))
+    Ctr = float(rospy.get_param("~Ctr", 0.01))
+    Cpd = float(rospy.get_param("~Cpd", 100.0))
+    Ctc = float(rospy.get_param("~Ctc", 0.1))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
@@ -209,8 +211,8 @@ def main_():
     rospy.wait_for_service(state_validity_service)
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
-    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=12, input_dim=11, output_dim=1, hidden_size=192)
+    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    # model = ValueNet(num_layers=18, input_dim=11, output_dim=1, hidden_size=192)
     # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1)
 
     opt = optim.Adam(model.parameters(), lr=lr)
@@ -221,7 +223,18 @@ def main_():
     t_loss = 0.0
     t_loss_pde = 0.0
     t_loss_term = 0.0
+    t_loss_tc = 0.0
     itr = 10
+
+    out_path = rospy.get_param(
+        "~out_path",
+        "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth",
+    )
+
+    train_perf_data_path = rospy.get_param(
+        "~train_perf_path",
+        "/root/catkin_ws/src/object_tracking/models/train_perf_data.csv"
+    )
 
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
     results_dir = "/Users/rckyi/Documents/GitHub/hackathon_space_effector/moveit_build/"
@@ -229,13 +242,15 @@ def main_():
     data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
     results_preamble = str(model) + "\n" + \
                        f"lr:{lr}" + "\n" \
-                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n" + data_header
+                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n" + data_header +"\n"
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
 
+    os.makedirs(os.path.dirname(train_perf_data_path), exist_ok=True)
 
-    total_validity_checks = 0
-    total_rejected_states = 0
+    with open(train_perf_data_path, "a") as f:
+        f.write(results_preamble)
+
 
     for it in range(1, iters + 1):
 
@@ -294,7 +309,8 @@ def main_():
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
-        V = model(build_input(q, t, g), build_input(q, t, g))
+        # V = model(build_input(q, t, g), build_input(q, t, g))
+        V = model(build_input(q, t, g))
 
         # loss_pde = hjb_residual_loss(
         #     V,
@@ -344,12 +360,34 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
-        loss_term = terminal_loss(VT, phi)
+        # VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
+        VT = model(build_input(qT, tT, gT))
+        # rospy.loginfo("VT shape =%s, gT shape =%s, phi shape =%s", VT.shape, gT.shape, phi.shape)
 
-        loss = Cpd * loss_pde + Ctr * loss_term
+        # --------------
+        # Boundary Condition (BC) cost
+        # --------------
+        phiT_np = np.zeros((bt,), dtype=np.float64)
+        for i in range(bt):
+            e = (VT[i].item() - np.sum(gT_np[i] ** 2))
+            phiT_np[i] = QpT * (e**2)
+            # try:
+            #     e = math.sqrt(VT[i]**2 - np.sum(gT_np[i]**2))
+            #     phiT_np[i] = QpT * e
+            # except Exception:
+            #     rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
+            #     phiT_np[i] = 1e3
+
+        phiT = torch.tensor(phi, dtype=torch.float32, device=device)
+
+        loss_term = terminal_loss(VT, phi)
+        loss_tc = terminal_loss_(phiT)
+
+        loss = Cpd * loss_pde + Ctr * loss_term + Ctc * loss_tc
+
         t_loss_pde += loss_pde.item()
         t_loss_term += loss_term.item()
+        t_loss_tc += loss_tc.item()
         t_loss += loss.item()
 
         opt.zero_grad(set_to_none=True)
@@ -359,20 +397,27 @@ def main_():
 
         if it % itr == 0:
             rospy.loginfo(
-                "iter=%d  pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs",
+                "iter=%d  pde=%.6f term=%.6f tc=%.6f loss=%.6f elapsed=%.1fs",
                 it,
                 float(t_loss_pde) / (itr * (batch + bt)),
                 float(t_loss_term) / (itr * (batch + bt)),
+                float(t_loss_tc) / (itr * (batch + bt)),
                 float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
             data_line = (f"{it}.2fs"
                          f"{float(t_loss_pde) / (itr * (batch + bt))}.4fs"
                          f",{float(t_loss_term) / (itr * (batch + bt))}.4fs"
+                         f",{float(t_loss_tc) / (itr * (batch + bt))}.4fs"
                          f",{float(t_loss) / (itr * (batch + bt))}.4fs"
                          )
+
+            with open(train_perf_data_path, "a") as f:
+                f.write(data_line + "\n")
+
             t_loss_pde = 0.0
             t_loss_term = 0.0
+            t_loss_tc = 0.0
             t_loss = 0.0
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
@@ -381,7 +426,20 @@ def main_():
         "model_state_dict": model.state_dict(),
         "optimizer_state_dict": opt.state_dict(),
         "loss": float(loss.item()),
+        # "model_type": model_type,
+        "T": T,
+        "R_diag": R_diag.detach().cpu().numpy(),
+        "joint_names": joint_names,
+        "jmin": jmin,
+        "jmax": jmax,
+
     }
+    # checkpoint = {
+    #     "epoch": 1,
+    #     "model_state_dict": model.state_dict(),
+    #     "optimizer_state_dict": opt.state_dict(),
+    #     "loss": float(loss.item()),
+    # }
     torch.save(checkpoint, out_path)
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)

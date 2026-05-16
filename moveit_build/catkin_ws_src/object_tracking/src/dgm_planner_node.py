@@ -83,8 +83,8 @@ def decode(code):
 
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
-    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=12, input_dim=11, output_dim=1, hidden_size=192).to(device)
+    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    # model = ValueNet(num_layers=18, input_dim=11, output_dim=1, hidden_size=192).to(device)
     # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
     checkpoint = torch.load(str(path.resolve()))
@@ -244,7 +244,7 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup ik proxy before init EE coordinates before init attempt = %s", get_ee_translation())
 
         hidden = int(rospy.get_param("~hidden", 256))
-        depth = int(rospy.get_param("~depth", 4))
+        depth = int(rospy.get_param("~depth", 8))
         mdl_path = "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
         path = Path(mdl_path)
         # Grant owner read/write, and others read (644)

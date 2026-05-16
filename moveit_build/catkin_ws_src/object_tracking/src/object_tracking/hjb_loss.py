@@ -41,10 +41,14 @@ def dist_term(value, min_limit, max_limit):
     return d ** 2
 
 
-def terminal_loss(VT, phi):
-    VT = VT.reshape(-1)
+# def terminal_loss_(VT, phi):
+#     VT = VT.reshape(-1)
+#     phi = phi.reshape(-1)
+#     return torch.mean((VT - phi) ** 2)
+
+def terminal_loss_(phi):
     phi = phi.reshape(-1)
-    return torch.mean((VT - phi) ** 2)
+    return (phi ** 2).mean()
 
 
 def hjb_residual_loss_(V, q, t, running_cost, R_inv_diag, vel_limits, Cv=0.0, T=1.0):
