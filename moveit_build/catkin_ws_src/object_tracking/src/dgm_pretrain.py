@@ -224,7 +224,7 @@ def main_():
     t_loss_pde = 0.0
     t_loss_term = 0.0
     t_loss_tc = 0.0
-    itr = 10
+    itr = 50
 
     out_path = rospy.get_param(
         "~out_path",
@@ -360,6 +360,8 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
+        l[-4:] = phi[-4:]
+
         # VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
         VT = model(build_input(qT, tT, gT))
         # rospy.loginfo("VT shape =%s, gT shape =%s, phi shape =%s", VT.shape, gT.shape, phi.shape)
@@ -369,14 +371,9 @@ def main_():
         # --------------
         phiT_np = np.zeros((bt,), dtype=np.float64)
         for i in range(bt):
-            e = (VT[i].item() - np.sum(gT_np[i] ** 2))
-            phiT_np[i] = QpT * (e**2)
-            # try:
-            #     e = math.sqrt(VT[i]**2 - np.sum(gT_np[i]**2))
-            #     phiT_np[i] = QpT * e
-            # except Exception:
-            #     rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
-            #     phiT_np[i] = 1e3
+            e = (VT[i].item() - math.sqrt(np.sum(gT_np[i] ** 2)))
+            phiT_np[i] = e
+           
 
         phiT = torch.tensor(phi, dtype=torch.float32, device=device)
 
@@ -434,12 +431,7 @@ def main_():
         "jmax": jmax,
 
     }
-    # checkpoint = {
-    #     "epoch": 1,
-    #     "model_state_dict": model.state_dict(),
-    #     "optimizer_state_dict": opt.state_dict(),
-    #     "loss": float(loss.item()),
-    # }
+  
     torch.save(checkpoint, out_path)
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)
