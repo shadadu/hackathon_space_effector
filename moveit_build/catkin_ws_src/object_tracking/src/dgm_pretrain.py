@@ -380,7 +380,7 @@ def main_():
         loss_term = terminal_loss(VT, phi)
         loss_tc = terminal_loss_(phiT)
 
-        loss = Cpd * loss_pde + Ctr * loss_term + Ctc * loss_tc
+        loss = Cpd * loss_pde + Ctr * loss_term # + Ctc * loss_tc
 
         t_loss_pde += loss_pde.item()
         t_loss_term += loss_term.item()
@@ -416,7 +416,7 @@ def main_():
             t_loss_term = 0.0
             t_loss_tc = 0.0
             t_loss = 0.0
-            
+
     f.close()
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
