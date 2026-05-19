@@ -347,6 +347,12 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
+        # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
+        # This is a bit hacky but seems to help.
+        n_samples = 8
+        indices = torch.randperm(bt)[:n_samples]
+        l[-8:] = phi[indices]
+
         VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
         loss_term = terminal_loss(VT, phi)
 
