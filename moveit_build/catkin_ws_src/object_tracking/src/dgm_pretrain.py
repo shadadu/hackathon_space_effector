@@ -389,7 +389,6 @@ def main_():
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)
     rospy.loginfo("DONE. Saved final: %s", out_path)
-    rospy.loginfo("Total training time = %%.1fs mins", str((time.time() - t0) / 60))
 
 
 if __name__ == "__main__":
