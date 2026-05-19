@@ -237,7 +237,7 @@ def main_():
     )
 
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
-    results_dir = "/Users/rckyi/Documents/GitHub/hackathon_space_effector/moveit_build/"
+    results_dir = "/home/shad/Documents/Git/hackathon_space_effector/moveit_build/"
     results_file = now + ".csv"
     data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
     results_preamble = str(model) + "\n" + \
@@ -402,11 +402,11 @@ def main_():
                 float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
-            data_line = (f"{it}.2fs"
-                         f"{float(t_loss_pde) / (itr * (batch + bt))}.4fs"
-                         f",{float(t_loss_term) / (itr * (batch + bt))}.4fs"
-                         f",{float(t_loss_tc) / (itr * (batch + bt))}.4fs"
-                         f",{float(t_loss) / (itr * (batch + bt))}.4fs"
+            data_line = (f"{it}%.2fs"
+                         f",{float(t_loss_pde) / (itr * (batch + bt))}%.4fs"
+                         f",{float(t_loss_term) / (itr * (batch + bt))}%.4fs"
+                         f",{float(t_loss_tc) / (itr * (batch + bt))}%.4fs"
+                         f",{float(t_loss) / (itr * (batch + bt))}%.4fs"
                          )
 
             with open(train_perf_data_path, "a") as f:
@@ -416,6 +416,8 @@ def main_():
             t_loss_term = 0.0
             t_loss_tc = 0.0
             t_loss = 0.0
+            
+    f.close()
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     checkpoint = {
