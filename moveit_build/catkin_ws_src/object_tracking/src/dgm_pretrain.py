@@ -360,7 +360,11 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        l[-4:] = phi[-4:]
+        # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
+        # This is a bit hacky but seems to help.
+        n_samples = 8
+        indices = torch.randperm(bt)[:n_samples]
+        l[-8:] = phi[indices]
 
         # VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
         VT = model(build_input(qT, tT, gT))
@@ -438,8 +442,6 @@ def main_():
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)
     rospy.loginfo("DONE. Saved final: %s", out_path)
-    rospy.loginfo("Total training time = %%.1fs mins", str((time.time() - t0) / 60))
-
 
 if __name__ == "__main__":
     main_()
