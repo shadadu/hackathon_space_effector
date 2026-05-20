@@ -186,7 +186,7 @@ def rollout_dgm_joint_policy(
 
         model.apply(enable_dropout) # add dropout to enable stochasticity
         # with torch.no_grad():
-        V = model(x, x)  # (1,)
+        V = model(x)  # (1,)
 
         # grad_q V
         grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
