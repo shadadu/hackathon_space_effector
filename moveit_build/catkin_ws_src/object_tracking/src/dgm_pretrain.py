@@ -382,9 +382,9 @@ def main_():
                 time.time() - t0
             )
             data_line = (f"{it}.2fs"
-                         f"{float(t_loss_pde) / (itr * (batch + bt))}.4fs"
-                         f",{float(t_loss_term) / (itr * (batch + bt))}.4fs"
-                         f",{float(t_loss) / (itr * (batch + bt))}.4fs"
+                         f"{float(t_loss_pde) / (itr * (batch + bt))}"
+                         f",{float(t_loss_term) / (itr * (batch + bt))}"
+                         f",{float(t_loss) / (itr * (batch + bt))}"
                          )
             t_loss_pde = 0.0
             t_loss_term = 0.0
