@@ -209,8 +209,8 @@ def main_():
     rospy.wait_for_service(state_validity_service)
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
-    # model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    model = ValueNet(num_layers=64, input_dim=11, output_dim=1, hidden_size=192)
+    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
+    # model = ValueNet(num_layers=64, input_dim=11, output_dim=1, hidden_size=192)
     # model = ValueNet_(num_layers=32, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1)
 
     opt = optim.Adam(model.parameters(), lr=lr)
@@ -236,9 +236,24 @@ def main_():
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
 
+    out_path = rospy.get_param(
+        "~out_path",
+        "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
+    )
+
+    train_perf_data_path = rospy.get_param(
+        "~train_perf_path",
+        "/root/catkin_ws/src/object_tracking/models/train_perf_data.csv"
+    )
+
 
     total_validity_checks = 0
     total_rejected_states = 0
+
+    os.makedirs(os.path.dirname(train_perf_data_path), exist_ok=True)
+
+    with open(train_perf_data_path, "a") as f:
+        f.write(results_preamble)
 
     for it in range(1, iters + 1):
 
@@ -299,9 +314,9 @@ def main_():
 
         bt = max(64, batch // 3)
 
-       
+        V = model(build_input(q, t, g))
 
-        V = model(build_input(q, t, g), build_input(q, t, g))
+        #V = model(build_input(q, t, g), build_input(q, t, g))
 
         
 
@@ -386,9 +401,14 @@ def main_():
                          f",{float(t_loss_term) / (itr * (batch + bt))}"
                          f",{float(t_loss) / (itr * (batch + bt))}"
                          )
+            with open(train_perf_data_path, "a") as f:
+                f.write(data_line + "\n")
+
             t_loss_pde = 0.0
             t_loss_term = 0.0
             t_loss = 0.0
+
+    f.close()
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
     checkpoint = {
