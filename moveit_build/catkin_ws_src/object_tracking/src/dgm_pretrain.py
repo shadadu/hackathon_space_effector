@@ -168,10 +168,10 @@ def main_():
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
 
-    Cj = float(rospy.get_param("~Cj", 0.1))
-    Cv = float(rospy.get_param("~Cv", 0.01))
-    Ctr = float(rospy.get_param("~Ctr", 100.0))
-    Cpd = float(rospy.get_param("~Cpd", 0.01))
+    Cj = float(rospy.get_param("~Cj", 0.0))
+    Cv = float(rospy.get_param("~Cv", 0.0))
+    Ctr = float(rospy.get_param("~Ctr", 0.01))
+    Cpd = float(rospy.get_param("~Cpd", 100.0))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
@@ -374,7 +374,7 @@ def main_():
             R_inv_diag
         )
 
-        VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
+        VT = model(build_input(qT, tT, gT))
         loss_term = terminal_loss(VT, phi)
 
         loss = Cpd * loss_pde + Ctr * loss_term
