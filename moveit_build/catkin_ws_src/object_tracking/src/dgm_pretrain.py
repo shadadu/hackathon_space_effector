@@ -173,7 +173,7 @@ def main_():
     Cv = float(rospy.get_param("~Cv", 0.0))
     Ctr = float(rospy.get_param("~Ctr", 0.01))
     Cpd = float(rospy.get_param("~Cpd", 100.0))
-    Ctc = float(rospy.get_param("~Ctc", 0.1))
+    Ctc = float(rospy.get_param("~Ctc", 0.0))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
@@ -239,10 +239,10 @@ def main_():
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
     results_dir = "/home/shad/Documents/Git/hackathon_space_effector/moveit_build/"
     results_file = now + ".csv"
-    data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
+    data_header = f"time,t_loss_pde,t_loss_term,t_losst_loss\n"
     results_preamble = str(model) + "\n" + \
                        f"lr:{lr}" + "\n" \
-                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n" + data_header +"\n"
+                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n" + data_header 
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
 
@@ -406,11 +406,11 @@ def main_():
                 float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
-            data_line = (f"{it}%.2fs"
-                         f",{float(t_loss_pde) / (itr * (batch + bt))}%.4fs"
-                         f",{float(t_loss_term) / (itr * (batch + bt))}%.4fs"
-                         f",{float(t_loss_tc) / (itr * (batch + bt))}%.4fs"
-                         f",{float(t_loss) / (itr * (batch + bt))}%.4fs"
+            data_line = (f"{it}"
+                         f",{float(t_loss_pde) / (itr * (batch + bt))}"
+                         f",{float(t_loss_term) / (itr * (batch + bt))}"
+                         f",{float(t_loss_tc) / (itr * (batch + bt))}"
+                         f",{float(t_loss) / (itr * (batch + bt))}"
                          )
 
             with open(train_perf_data_path, "a") as f:
