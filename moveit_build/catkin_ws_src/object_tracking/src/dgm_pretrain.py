@@ -221,7 +221,7 @@ def main_():
     t_loss = 0.0
     t_loss_pde = 0.0
     t_loss_term = 0.0
-    itr = 10
+    itr = 50
 
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
     results_dir = rospy.get_param(
@@ -297,15 +297,13 @@ def main_():
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
+        bt = max(64, batch // 3)
+
+       
+
         V = model(build_input(q, t, g), build_input(q, t, g))
 
-        loss_pde = hjb_residual_loss(
-            V,
-            q,
-            t,
-            l,
-            R_inv_diag
-        )
+        
 
         #
         # loss_pde = hjb_residual_loss_(
@@ -320,7 +318,7 @@ def main_():
 
         # Terminal batch
 
-        bt = max(64, batch // 3)
+        
 
         qT_np = sample_valid_q_batch(
             svc=validity_svc,
@@ -347,11 +345,19 @@ def main_():
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
+         # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
         # This is a bit hacky but seems to help.
         n_samples = 8
         indices = torch.randperm(bt)[:n_samples]
-        l[-8:] = phi[indices]
+        l[-n_samples:] = phi[indices]
+
+        loss_pde = hjb_residual_loss(
+            V,
+            q,
+            t,
+            l,
+            R_inv_diag
+        )
 
         VT = model(build_input(qT, tT, gT), build_input(qT, tT, gT))
         loss_term = terminal_loss(VT, phi)
