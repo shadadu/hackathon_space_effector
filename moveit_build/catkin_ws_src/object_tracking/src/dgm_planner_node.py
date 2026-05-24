@@ -244,7 +244,7 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup ik proxy before init EE coordinates before init attempt = %s", get_ee_translation())
 
         hidden = int(rospy.get_param("~hidden", 256))
-        depth = int(rospy.get_param("~depth", 8))
+        depth = int(rospy.get_param("~depth", 10))
         mdl_path = "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
         path = Path(mdl_path)
         # Grant owner read/write, and others read (644)
