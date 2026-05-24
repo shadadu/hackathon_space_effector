@@ -162,7 +162,7 @@ def main_():
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 8))
+    depth = int(rospy.get_param("~depth", 10))
 
     print(f"device: {device}")
 
