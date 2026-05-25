@@ -279,9 +279,6 @@ def rollout_dgm_batch_joint_policy(
 
     for t in ts:
 
-    #while (k < N) and (proximity_threshold < proximity_ee):
-        # for k in range(N):
-
         q_hist[k, :] = q
 
         # Add trajectory point at current q (velocities set below)
