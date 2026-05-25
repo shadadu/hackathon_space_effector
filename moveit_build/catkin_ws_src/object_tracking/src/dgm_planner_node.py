@@ -21,7 +21,7 @@ from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
 from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_
 from trajectory_executor_manager import get_panda_start_pose, get_end_translation
-from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
+from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy, rollout_dgm_batch_joint_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 # from trajectory_executor_manager import panda_extended_open_start_state, euclidean_dist
@@ -531,7 +531,7 @@ class DGMPlannerService:
         rospy.loginfo("start state ee pos: %s ", ee_pos)
         t0 = time.time()
         try:
-            traj, q_hist = rollout_dgm_joint_policy(
+            traj, q_hist = rollout_dgm_batch_joint_policy(
                 model=self.model,
                 q0=q0,
                 goal_pos=goal_pos,
