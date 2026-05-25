@@ -161,7 +161,7 @@ def main_():
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 4))
+    depth = int(rospy.get_param("~depth", 10))
 
     print(f"device: {device}")
 
@@ -292,6 +292,7 @@ def main_():
             )
 
         t_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+        t_np = np.sort(t_np.flatten()).reshape((batch, 1))
         g_np = sample_goals(batch)
 
         pos_cost_np = np.zeros((batch,), dtype=np.float64)
