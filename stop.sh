@@ -5,6 +5,8 @@ NET_NAME="${NET_NAME:-rosnet}"
 ROS_MASTER_NAME="${ROS_MASTER_NAME:-ros_master}"
 ASTROBEE_NAME="${ASTROBEE_NAME:-astrobee}"
 MOVEIT_NAME="${MOVEIT_NAME:-moveit}"
+PRUNE_DOCKER="${PRUNE_DOCKER:-false}"
+PRUNE_VOLUMES="${PRUNE_VOLUMES:-false}"
 
 log() { echo -e "\n\033[1;34m[INFO]\033[0m $*"; }
 ok()  { echo -e "\033[1;32m[PASS]\033[0m $*"; }
@@ -32,7 +34,15 @@ else
   ok "Network not present: $NET_NAME"
 fi
 
-log "Freeing memory space/volumes"
-docker system prune --volumes --force
+if [[ "$PRUNE_DOCKER" == "true" || "$PRUNE_DOCKER" == "1" ]]; then
+  log "Pruning unused Docker data"
+  if [[ "$PRUNE_VOLUMES" == "true" || "$PRUNE_VOLUMES" == "1" ]]; then
+    docker system prune --volumes --force
+  else
+    docker system prune --force
+  fi
+else
+  ok "Preserved Docker cache and volumes (set PRUNE_DOCKER=true to prune)"
+fi
 
 ok "Teardown complete."

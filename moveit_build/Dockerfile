@@ -36,21 +36,6 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-xacro \
     && rm -rf /var/lib/apt/lists/*
 
-# Create catkin workspace
-RUN mkdir -p /root/catkin_ws/src
-WORKDIR /root/catkin_ws/src
-
-# Copy ALL local ROS packages into the workspace
-COPY catkin_ws_src/ /root/catkin_ws/src/
-
-WORKDIR /root/catkin_ws
-
-# Runtime output directories and executable ROS Python nodes
-RUN mkdir -p /root/catkin_ws/src/object_tracking/models \
-    /root/catkin_ws/src/object_tracking/results \
-    /root/catkin_ws/src/object_tracking/data && \
-    find /root/catkin_ws/src -path '*/src/*.py' -exec chmod +x {} \;
-
 # CPU-only PyTorch for portable Docker hosts. Keep pins compatible with Ubuntu 20.04's Python 3.8.
 RUN pip3 install --no-cache-dir \
     typing_extensions==4.12.2 \
@@ -60,6 +45,17 @@ RUN pip3 install --no-cache-dir \
 # Install Python dependencies
 COPY ./requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
+
+# Copy application source after large dependency layers so code edits rebuild quickly.
+RUN mkdir -p /root/catkin_ws/src
+COPY catkin_ws_src/ /root/catkin_ws/src/
+WORKDIR /root/catkin_ws
+
+# Runtime output directories and executable ROS Python nodes
+RUN mkdir -p /root/catkin_ws/src/object_tracking/models \
+    /root/catkin_ws/src/object_tracking/results \
+    /root/catkin_ws/src/object_tracking/data && \
+    find /root/catkin_ws/src -path '*/src/*.py' -exec chmod +x {} \;
 
 # Build
 RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"

@@ -12,6 +12,7 @@ NET_NAME="${NET_NAME:-rosnet}"
 ROS_MASTER_NAME="${ROS_MASTER_NAME:-ros_master}"
 ASTROBEE_NAME="${ASTROBEE_NAME:-astrobee}"
 MOVEIT_NAME="${MOVEIT_NAME:-moveit}"
+DGM_MODELS_VOLUME="${DGM_MODELS_VOLUME:-moveit_dgm_models}"
 
 ROS_MASTER_IMAGE="${ROS_MASTER_IMAGE:-ros:noetic-ros-core}"
 ASTROBEE_IMAGE="${ASTROBEE_IMAGE:-astrobee_grasp:noetic}"
@@ -19,7 +20,7 @@ MOVEIT_IMAGE="${MOVEIT_IMAGE:-moveit_image:noetic}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
 
 ASTROBEE_LAUNCH="${ASTROBEE_LAUNCH:-roslaunch astrobee_grasp perception.launch}"
-MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rviz:=false}"
+MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rviz:=false start_dgm_planner:=false}"
 ASTROBEE_ENABLE_X11="${ASTROBEE_ENABLE_X11:-false}"
 
 MASTER_TIMEOUT="${MASTER_TIMEOUT:-20}"
@@ -259,6 +260,10 @@ start_idle_container() {
         docker_args+=(--device /dev/dri)
       fi
     fi
+  elif [[ "$name" == "$MOVEIT_NAME" ]]; then
+    docker_args+=(
+      -v "$DGM_MODELS_VOLUME:/root/catkin_ws/src/object_tracking/models"
+    )
   fi
 
   "${docker_args[@]}" "$image" bash -lc "tail -f /dev/null" >/dev/null
@@ -340,12 +345,6 @@ rospack find jacobian_server >/dev/null
 
   wait_for_param "$container" "/robot_description" "$timeout"
 
-  log "Building jacobian_server"
-  ros_exec "$container" "
-cd /root/catkin_ws
-catkin_make --pkg jacobian_server
-" || fail "jacobian_server build failed"
-
   ros_exec "$container" "
 if rosnode list 2>/dev/null | grep -qx '/jacobian_server_node'; then
   rosnode kill /jacobian_server_node || true
@@ -415,13 +414,13 @@ LAST_STEP="moveit_start"
 start_idle_container "$MOVEIT_NAME" "$MOVEIT_IMAGE"
 make_scripts_executable "$MOVEIT_NAME" "/root/catkin_ws/src/object_tracking/src"
 
-log "Building MoveIt workspace"
+log "Verifying prebuilt MoveIt workspace"
 ros_exec "$MOVEIT_NAME" "
 command -v gcc >/dev/null
 command -v g++ >/dev/null
-cd /root/catkin_ws
-catkin_make
-" || fail "MoveIt workspace build failed"
+test -f /root/catkin_ws/devel/setup.bash
+test -x /root/catkin_ws/devel/lib/jacobian_server/jacobian_server_node
+" || fail "MoveIt image is missing prebuilt workspace artifacts"
 
 log "Launching MoveIt demo"
 ros_bg_exec "$MOVEIT_NAME" "/root/start_logs/moveit_demo.log" "$MOVEIT_LAUNCH"
