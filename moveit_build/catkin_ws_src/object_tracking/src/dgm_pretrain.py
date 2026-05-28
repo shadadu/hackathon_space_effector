@@ -159,16 +159,11 @@ def main_():
 
     iters = int(rospy.get_param("~iters", 3000))
     batch = int(rospy.get_param("~batch", 192))
-    m = int(rospy.get_param("~m", 1))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
     depth = int(rospy.get_param("~depth", 10))
 
-    if m < 1:
-        raise ValueError(f"Expected ~m >= 1, got {m}")
-
     print(f"device: {device}")
-    print(f"parallel sample lanes m: {m}")
 
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 80.0))
@@ -178,7 +173,7 @@ def main_():
     Ctr = float(rospy.get_param("~Ctr", 0.01))
     Cpd = float(rospy.get_param("~Cpd", 100.0))
 
-    R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32, device=device)
+    R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
     R_inv_diag = 1.0 / R_diag
     
@@ -236,7 +231,7 @@ def main_():
     results_file = now + ".csv"
     data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
     results_preamble = str(model) + "\n" + \
-                       f"lr:{lr},batch:{batch},m:{m}" + "\n" \
+                       f"lr:{lr}" + "\n" \
                                     f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n" + data_header
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
@@ -264,21 +259,21 @@ def main_():
 
         # PDE / rollout training batch
 
-        q_flat_np = sample_valid_q_batch(
+        q_np = sample_valid_q_batch(
             svc=validity_svc,
             active_joints=joint_names,
             group_name=group_name,
             jmin=jmin,
             jmax=jmax,
-            batch_size=m * batch,
+            batch_size=batch,
         )
 
         # Optional audit using trajectory validator style.
-        # Since q_flat_np is a stack of states, this checks the whole batch as a "trajectory".
+        # Since q_np is a stack of states, this checks the whole batch as a "trajectory".
         ok, first_bad_idx, msg = validate_with_moveit_state_validity(
             svc=validity_svc,
             active_joints=joint_names,
-            q_hist=q_flat_np,
+            q_hist=q_np,
             group_name=group_name,
             stride=1,
         )
@@ -287,82 +282,90 @@ def main_():
                 "Unexpected invalid state after filtering at index %d: %s. Resampling batch.",
                 first_bad_idx, msg
             )
-            q_flat_np = sample_valid_q_batch(
+            q_np = sample_valid_q_batch(
                 svc=validity_svc,
                 active_joints=joint_names,
                 group_name=group_name,
                 jmin=jmin,
                 jmax=jmax,
-                batch_size=m * batch,
+                batch_size=batch,
             )
 
-        q_np = q_flat_np.reshape(m, batch, 7)
-        t_base_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
-        t_base_np = np.sort(t_base_np.flatten()).reshape((batch, 1))
-        t_np = np.broadcast_to(t_base_np, (m, batch, 1)).copy()
-        g_flat_np = sample_goals(m * batch)
-        g_np = g_flat_np.reshape(m, batch, 3)
+        t_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+        t_np = np.sort(t_np.flatten()).reshape((batch, 1))
+        g_np = sample_goals(batch)
 
-        pos_cost_flat_np = np.zeros((m * batch,), dtype=np.float64)
-        for i in range(m * batch):
+        pos_cost_np = np.zeros((batch,), dtype=np.float64)
+        for i in range(batch):
             try:
-                p = fk.ee_position(joint_names, q_flat_np[i])
-                e = p - g_flat_np[i]
-                pos_cost_flat_np[i] = Qp * float(np.dot(e, e))
+                p = fk.ee_position(joint_names, q_np[i])
+                e = p - g_np[i]
+                pos_cost_np[i] = Qp * float(np.dot(e, e))
             except Exception:
                 rospy.logwarn("fk_pos l: couldn't retrieve fk position")
-                pos_cost_flat_np[i] = 1e3
+                pos_cost_np[i] = 1e3
 
-        joint_limit_penalty_flat_np = batch_joint_limit_penalty(q_flat_np, jmin, jmax)
-        l_np = (pos_cost_flat_np + Cj * joint_limit_penalty_flat_np).reshape(m, batch)
-
-        bt = max(64, batch // 3)
-
-        # Terminal batch
-
-        qT_flat_np = sample_valid_q_batch(
-            svc=validity_svc,
-            active_joints=joint_names,
-            group_name=group_name,
-            jmin=jmin,
-            jmax=jmax,
-            batch_size=m * bt,
-        )
-        qT_np = qT_flat_np.reshape(m, bt, 7)
-        gT_flat_np = sample_goals(m * bt)
-        gT_np = gT_flat_np.reshape(m, bt, 3)
-
-        phi_flat_np = np.zeros((m * bt,), dtype=np.float64)
-        for i in range(m * bt):
-            try:
-                p = fk.ee_position(joint_names, qT_flat_np[i])
-                e = p - gT_flat_np[i]
-                phi_flat_np[i] = QpT * float(np.dot(e, e))
-            except Exception:
-                rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
-                phi_flat_np[i] = 1e3
-        phi_np = phi_flat_np.reshape(m, bt)
-
-        # Include complete terminal samples in the PDE batch for the existing stability heuristic.
-        n_samples = min(8, batch, bt)
-        for lane in range(m):
-            indices = np.random.permutation(bt)[:n_samples]
-            q_np[lane, -n_samples:] = qT_np[lane, indices]
-            t_np[lane, -n_samples:] = T
-            g_np[lane, -n_samples:] = gT_np[lane, indices]
-            l_np[lane, -n_samples:] = phi_np[lane, indices]
+        joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
+        l_np = pos_cost_np + Cj * joint_limit_penalty_np
 
         q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
         t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
 
+        bt = max(64, batch // 3)
+
+        V = model(build_input(q, t, g))
+
+        #V = model(build_input(q, t, g), build_input(q, t, g))
+
+        
+
+        #
+        # loss_pde = hjb_residual_loss_(
+        #     V=V,
+        #     q=q,
+        #     t=t,
+        #     running_cost=l,
+        #     R_inv_diag=R_inv_diag.to(device),
+        #     vel_limits=vel_limits,
+        #     Cv=Cv
+        # )
+
+        # Terminal batch
+
+        
+
+        qT_np = sample_valid_q_batch(
+            svc=validity_svc,
+            active_joints=joint_names,
+            group_name=group_name,
+            jmin=jmin,
+            jmax=jmax,
+            batch_size=bt,
+        )
+        gT_np = sample_goals(bt)
+
+        phi_np = np.zeros((bt,), dtype=np.float64)
+        for i in range(bt):
+            try:
+                p = fk.ee_position(joint_names, qT_np[i])
+                e = p - gT_np[i]
+                phi_np[i] = QpT * float(np.dot(e, e))
+            except Exception:
+                rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
+                phi_np[i] = 1e3
+
         qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
-        tT = torch.ones((m, bt, 1), dtype=torch.float32, device=device, requires_grad=True)
+        tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        V = model(build_input(q, t, g))
+         # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
+        # This is a bit hacky but seems to help.
+        n_samples = 8
+        indices = torch.randperm(bt)[:n_samples]
+        l[-n_samples:] = phi[indices]
 
         loss_pde = hjb_residual_loss(
             V,
@@ -386,23 +389,18 @@ def main_():
         opt.step()
 
         if it % itr == 0:
-            mean_loss_pde = float(t_loss_pde) / (itr*(batch + bt))
-            mean_loss_term = float(t_loss_term) / (itr*(batch + bt))
-            mean_loss = float(t_loss) / (itr*(batch + bt))
-            elapsed_s = time.time() - t0
             rospy.loginfo(
-                "iter=%d m=%d pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs",
+                "iter=%d  pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs",
                 it,
-                m,
-                mean_loss_pde,
-                mean_loss_term,
-                mean_loss,
-                elapsed_s
+                float(t_loss_pde) / (itr * (batch + bt)),
+                float(t_loss_term) / (itr * (batch + bt)),
+                float(t_loss) / (itr * (batch + bt)),
+                time.time() - t0
             )
-            data_line = (f"{elapsed_s:.2f}"
-                         f",{mean_loss_pde}"
-                         f",{mean_loss_term}"
-                         f",{mean_loss}"
+            data_line = (f"{it}.2fs"
+                         f"{float(t_loss_pde) / (itr * (batch + bt))}"
+                         f",{float(t_loss_term) / (itr * (batch + bt))}"
+                         f",{float(t_loss) / (itr * (batch + bt))}"
                          )
             with open(train_perf_data_path, "a") as f:
                 f.write(data_line + "\n")
