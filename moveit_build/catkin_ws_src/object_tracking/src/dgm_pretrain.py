@@ -161,7 +161,7 @@ def main_():
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 10))
+    depth = int(rospy.get_param("~depth", 8))
 
     print(f"device: {device}")
 
@@ -170,7 +170,7 @@ def main_():
 
     Cj = float(rospy.get_param("~Cj", 0.0))
     Cv = float(rospy.get_param("~Cv", 0.0))
-    Ctr = float(rospy.get_param("~Ctr", 0.01))
+    Ctr = float(rospy.get_param("~Ctr", 0.005))
     Cpd = float(rospy.get_param("~Cpd", 100.0))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
