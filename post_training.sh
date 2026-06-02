@@ -7,8 +7,8 @@ ASTROBEE_NAME="${ASTROBEE_NAME:-astrobee}"
 MOVEIT_NAME="${MOVEIT_NAME:-moveit}"
 MODEL_NAME="${MODEL_NAME:-panda_dgm_v1.pth}"
 
-RESULT_MODEL="${RESULT_DIR:-/Users/rckyi/Documents/results/panda_dgm_v1.pth}"
-TRAIN_PERF_DATA="${RESULT_DIR:-/Users/rckyi/Documents/results/training_perf_data.csv}"
+RESULT_MODEL="${RESULT_DIR:-/home/shad/Documents/results/panda_dgm_v1.pth}"
+TRAIN_PERF_DATA="${RESULT_DIR:-/home/shad/Documents/results/training_perf_data.csv}"
 
 log() { echo -e "\n\033[1;34m[INFO]\033[0m $*"; }
 ok()  { echo -e "\033[1;32m[PASS]\033[0m $*"; }
