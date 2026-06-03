@@ -166,11 +166,11 @@ def main_():
     print(f"device: {device}")
 
     Qp = float(rospy.get_param("~Qp", 10.0))
-    QpT = float(rospy.get_param("~Qp_terminal", 80.0))
+    QpT = float(rospy.get_param("~Qp_terminal", 100.0))
 
     Cj = float(rospy.get_param("~Cj", 0.0))
     Cv = float(rospy.get_param("~Cv", 0.0))
-    Ctr = float(rospy.get_param("~Ctr", 0.005))
+    Ctr = float(rospy.get_param("~Ctr", 1.0))
     Cpd = float(rospy.get_param("~Cpd", 100.0))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
@@ -300,7 +300,7 @@ def main_():
             try:
                 p = fk.ee_position(joint_names, q_np[i])
                 e = p - g_np[i]
-                pos_cost_np[i] = Qp * float(np.dot(e, e))
+                pos_cost_np[i] = 0.5 * Qp * float(np.dot(e, e))
             except Exception:
                 rospy.logwarn("fk_pos l: couldn't retrieve fk position")
                 pos_cost_np[i] = 1e3
@@ -351,7 +351,7 @@ def main_():
             try:
                 p = fk.ee_position(joint_names, qT_np[i])
                 e = p - gT_np[i]
-                phi_np[i] = QpT * float(np.dot(e, e))
+                phi_np[i] = 0.5 * QpT * float(np.dot(e, e))
             except Exception:
                 rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
                 phi_np[i] = 1e3

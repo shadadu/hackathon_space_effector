@@ -1,0 +1,6 @@
+# pack-refs with: peeled fully-peeled sorted 
+94013e2024bb1ca51e68278b9a2f9cc7ebd47467 refs/remotes/origin/main
+45e06310c86fed4659c7e1a91b92037f9cd69229 refs/remotes/origin/migrate-mac-ubuntu
+42b98eaa69b07093216018f6fe52fc3e829d9f17 refs/remotes/origin/perception-vlm
+b4c40f63dec4aa759304c4a1afd7e3f20e04214d refs/remotes/origin/ubuntu-migrate
+3298ec155b54e2a0da5a9fdc71945177405b4054 refs/remotes/origin/valuenet

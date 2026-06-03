@@ -65,6 +65,7 @@ catkin_install_python(
     src/trajectory_executor_manager.py
     src/dgm_planner_node.py
     src/dgm_train.py
+    src/dgm_training.py
     src/dgm_pretrain.py
     src/dgm_dataset_gen.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}

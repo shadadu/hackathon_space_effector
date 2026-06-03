@@ -29,9 +29,6 @@ def terminal_loss(V_T, phi_T):
     return ((V_T - phi_T) ** 2).mean()
 
 
-import torch
-
-
 def dist_term(value, min_limit, max_limit):
     """
     value: tensor or scalar

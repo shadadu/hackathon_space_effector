@@ -1,0 +1,11 @@
+0000000000000000000000000000000000000000 94013e2024bb1ca51e68278b9a2f9cc7ebd47467 Shadrack Antwi <sxantwi@gmail.com> 1779194608 -0400	clone: from https://github.com/shadadu/hackathon_space_effector.git
+94013e2024bb1ca51e68278b9a2f9cc7ebd47467 e7e11566c1fc8d8ccb12f8421a5a17b045a2b33c Shadrack Antwi <sxantwi@gmail.com> 1779196711 -0400	commit: Update dgm_pretrain.py
+e7e11566c1fc8d8ccb12f8421a5a17b045a2b33c 90ec448ddcabcde352b01c133bd3aac4c42b3c98 Shadrack Antwi <sxantwi@gmail.com> 1779198046 -0400	commit: add processing bash files
+90ec448ddcabcde352b01c133bd3aac4c42b3c98 f21610b3755c56649700e4477ea81e419a54e3d3 Shadrack Antwi <sxantwi@gmail.com> 1779201574 -0400	commit: Update dgm_pretrain.py
+f21610b3755c56649700e4477ea81e419a54e3d3 7a5074d1eb120d418ec1af69163d1d37136012a1 Shadrack Antwi <sxantwi@gmail.com> 1779217616 -0400	commit: Update dgm_pretrain.py
+7a5074d1eb120d418ec1af69163d1d37136012a1 73bc71057ae30938c9836b8c4b99ba234f26875b Shadrack Antwi <sxantwi@gmail.com> 1779308063 -0400	commit: Update dgm_pretrain.py
+73bc71057ae30938c9836b8c4b99ba234f26875b 918f7f15efa65cdd94e45167e0921c5222f00a54 Shadrack Antwi <sxantwi@gmail.com> 1779308065 -0400	commit: Update post_training.sh
+918f7f15efa65cdd94e45167e0921c5222f00a54 12d880d0d94da1fea7703359277fc9e3bb52ff7b Shadrack Antwi <sxantwi@gmail.com> 1779308068 -0400	commit: Update Results_Plots.ipynb
+12d880d0d94da1fea7703359277fc9e3bb52ff7b 08cd733715936ebca8fd7331c9ef0dd067758e27 Shadrack Antwi <sxantwi@gmail.com> 1779593698 -0400	commit: Update Results_Plots.ipynb
+08cd733715936ebca8fd7331c9ef0dd067758e27 15d21423fad5e5585ad409870d567cab6f1d7e7f Shadrack Antwi <sxantwi@gmail.com> 1779593702 -0400	commit: Update dgm_pretrain.py
+15d21423fad5e5585ad409870d567cab6f1d7e7f b762a8b8db86d6e3abd1c213470886aa63a1f511 Shadrack Antwi <sxantwi@gmail.com> 1779593757 -0400	commit: Update dgm_planner_node.py
