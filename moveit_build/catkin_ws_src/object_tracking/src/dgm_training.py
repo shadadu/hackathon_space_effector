@@ -9,7 +9,6 @@ import torch.optim as optim
 
 from dataclasses import dataclass
 
-from moveit_commander import MoveGroupCommander
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_, build_input, save_checkpoint
@@ -20,9 +19,16 @@ from datetime import datetime
 from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes, RobotTrajectory
 from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest
 from moveit_commander import RobotCommander, MoveGroupCommander
+
+from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
+from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
+from moveit_msgs.msg import RobotTrajectory, RobotState
+
 from sensor_msgs.msg import JointState
 
 from trajectory_msgs.msg import JointTrajectoryPoint
+
+
 
 
 from dgm_planner_node import (
@@ -159,13 +165,11 @@ def rollout_sampling_batch(
     traj = RobotTrajectory()
     traj.joint_trajectory.joint_names = list(active_joints)
 
-    q_hist = np.zeros((batch, 7), dtype=np.float64)
+    batch_samples = np.zeros((batch, 7), dtype=np.float64)
     nan_hits = 0
 
     # Precompute R^{-1}
     R_inv = 1.0 / np.maximum(cfg.R_diag, 1e-9)
-
-
 
     k = 0
     dt = batch_t[0]
@@ -173,7 +177,7 @@ def rollout_sampling_batch(
 
         t = batch_t[k]
 
-        q_hist[k, :] = q
+        batch_samples[k, :] = q
 
         # Add trajectory point at current q (velocities set below)
         # Add trajectory point at current q (velocities set below)
@@ -183,7 +187,7 @@ def rollout_sampling_batch(
 
         # Torch inputs
         qt = torch.tensor(q[None, :], dtype=torch.float32, device=device, requires_grad=True)
-        tt = torch.tensor([t], dtype=torch.float32, device=device)  # normalize time to [0,1]
+        tt = torch.tensor(np.asarray([t]), dtype=torch.float32, device=device)  # normalize time to [0,1]
         gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
         #rospy.loginfo("qt, tt, gt ready")
 
@@ -193,7 +197,7 @@ def rollout_sampling_batch(
         # with torch.no_grad():
         V = model(x)  # (1,)
 
-        rospy.loginfo("V computed: %s", V.shape)
+        #rospy.loginfo("V computed: %s", V.shape)
 
         # grad_q V
         grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
@@ -217,7 +221,7 @@ def rollout_sampling_batch(
 
         # integrate forward (except after last point)
         if k > 0:
-            dt = batch_t[k] - batch_t[k-1]
+            dt = max(1e-4, batch_t[k] - batch_t[k-1])
             #dt = torch.from_numpy(np.array(dt, dtype=np.float32)).to(device)
         if k < rollout_length- 1:
             u_np = u.detach().cpu().numpy()
@@ -226,11 +230,9 @@ def rollout_sampling_batch(
 
         k += 1
 
-    rospy.loginfo("Rollout sampling done: initial_q: %s, q_hist %s", initial_q.shape, q_hist.shape)
+    #rospy.loginfo("Rollout sampling done: initial_q: %s, q_hist %s", initial_q.shape, batch_samples.shape)
 
-    rospy.loginfo("Rollout sampling done. nan_hits: %d / %d", nan_hits, rollout_length)
-
-    batch_samples = np.concatenate([initial_q.reshape(-1, 7), q_hist], axis=0)
+    #rospy.loginfo("Rollout sampling done. nan_hits: %d / %d", nan_hits, rollout_length)
 
     return batch_samples
 
@@ -281,12 +283,7 @@ def sample_valid_q_batch(
 
     return np.asarray(collected, dtype=np.float64)
 
-from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
-from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
-from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest
-from moveit_commander import RobotCommander, MoveGroupCommander
-from moveit_msgs.msg import RobotTrajectory, RobotState
-from sensor_msgs.msg import JointState
+
 
 def main_():
     rospy.init_node("dgm_pretrain")
@@ -463,7 +460,7 @@ def main_():
                            active_joints=active_joints, 
                            model=model)
         
-        rospy.loginfo("Rollout samples shape: %s", rollout_samples.shape)
+        #rospy.loginfo("Rollout samples, batch shapes: %s, %s", rollout_samples.shape, q_np.shape)
 
 
         pos_cost_np = np.zeros((batch,), dtype=np.float64)
@@ -479,7 +476,7 @@ def main_():
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
 
-        q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
+        q = torch.tensor(rollout_samples, dtype=torch.float32, device=device, requires_grad=True)
         t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
@@ -488,7 +485,7 @@ def main_():
 
         V = model(build_input(q, t, g))
 
-        rospy.loginfo("V shape: %s", V.shape)
+        #rospy.loginfo("V shape: %s", V.shape)
 
         #V = model(build_input(q, t, g), build_input(q, t, g))
 
@@ -529,10 +526,26 @@ def main_():
                 rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
                 phi_np[i] = 1e3
 
-        qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
+        
+
+        
         tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
+        rollout_samples_T = rollout_sampling_batch( 
+                           batch=bt, 
+                           initial_q=qT_np[0],
+                           batch_t=tT.detach().cpu().numpy(),
+                           cfg=cfg,
+                           goal_pos=gT_np[0],
+                           active_joints=active_joints, 
+                           model=model)
+        
+        #rospy.loginfo("Rollout T samples. gT shapes: %s, %s", rollout_samples_T.shape, qT_np.shape)
+
+        qT = torch.tensor(rollout_samples_T, dtype=torch.float32, device=device)
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
+
+        
 
          # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
         # This is a bit hacky but seems to help.
@@ -570,8 +583,8 @@ def main_():
                 float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
-            data_line = (f"{it}.2fs"
-                         f"{float(t_loss_pde) / (itr * (batch + bt))}"
+            data_line = (f"{it}"
+                         f",{float(t_loss_pde) / (itr * (batch + bt))}"
                          f",{float(t_loss_term) / (itr * (batch + bt))}"
                          f",{float(t_loss) / (itr * (batch + bt))}"
                          )
