@@ -150,7 +150,7 @@ def rollout_dgm_joint_policy(
     q = q0.astype(np.float64).copy()
 
     traj = RobotTrajectory()
-    traj.joint_trajectory.joint_names = list(active_joints)
+    traj.joint_trajectory.joint_names = list(active_joints)    
 
     q_hist = np.zeros((N, 7), dtype=np.float64)
     nan_hits = 0
@@ -338,7 +338,7 @@ def rollout_dgm_batch_joint_policy(
         if k == 0:
             dt = ts[k]
         if k > 0:
-            dt = t - ts[k-1]
+            dt = max(1e-3, ts[k] - ts[k-1])
         if k < N - 1:
             q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
