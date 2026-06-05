@@ -1,18 +1,35 @@
 #!/usr/bin/env python3
 import os
 import time
+from typing import List
 import numpy as np
 import rospy
 import torch
 import torch.optim as optim
 
-from moveit_commander import MoveGroupCommander
+from dataclasses import dataclass
+
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_, build_input, save_checkpoint
 from object_tracking.hjb_loss import hjb_residual_loss, hjb_residual_loss_, terminal_loss
 from object_tracking.fk_client import FKClient
 from datetime import datetime
+
+from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes, RobotTrajectory
+from moveit_msgs.srv import GetPositionIK, GetPositionIKRequest
+from moveit_commander import RobotCommander, MoveGroupCommander
+
+from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
+from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
+from moveit_msgs.msg import RobotTrajectory, RobotState
+
+from sensor_msgs.msg import JointState
+
+from trajectory_msgs.msg import JointTrajectoryPoint
+
+
+
 
 from dgm_planner_node import (
     validate_with_moveit_state_validity,
@@ -23,7 +40,17 @@ from dgm_planner_node import (
 Reference
 1. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning, pp 41-47
 """
+def clamp(x, lo, hi):
+    return np.minimum(np.maximum(x, lo), hi)
 
+
+def default_vel_limits():
+    # Conservative joint velocity limits (rad/s) for stable rollout
+    return np.array([1.5, 1.5, 1.5, 1.8, 1.8, 2.0, 2.0], dtype=np.float64)
+
+
+def finite(x: np.ndarray) -> bool:
+    return np.all(np.isfinite(x))
 
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
@@ -102,6 +129,114 @@ def filter_valid_q_batch(svc, active_joints, q_batch, group_name):
     return np.asarray(valid_rows, dtype=np.float64)
 
 
+@dataclass
+class RolloutConfig:
+    T: float = 2.0
+    dt: float = 0.02
+    vel_limits: np.ndarray = None  # (7,)
+    joint_min: np.ndarray = None  # (7,)
+    joint_max: np.ndarray = None  # (7,)
+    R_diag: np.ndarray = None  # (7,)
+    max_nan_guard: int = 5
+
+def rollout_sampling_batch( 
+                           batch, 
+                           initial_q, 
+                           batch_t,
+                           cfg,
+                           goal_pos,
+                           active_joints, 
+                           model,
+                           device = "cpu"):
+    """
+    For rollout training, we need to sample initial states and then do a forward rollout 
+    using the current policy to get state-action pairs for training.
+
+    The HJB residual loss only needs state samples, but the rollout loss needs state-action pairs, 
+    so we need to compute the optimal control u* for each sampled state in order to do rollouts and get the next states.
+    """
+
+    rollout_length = batch - len(initial_q)  # how many steps to rollout forward
+
+    rolls = range(rollout_length-1)
+
+    q = initial_q
+
+    traj = RobotTrajectory()
+    traj.joint_trajectory.joint_names = list(active_joints)
+
+    batch_samples = np.zeros((batch, 7), dtype=np.float64)
+    nan_hits = 0
+
+    # Precompute R^{-1}
+    R_inv = 1.0 / np.maximum(cfg.R_diag, 1e-9)
+
+    k = 0
+    dt = batch_t[0]
+    for k in rolls:
+
+        t = batch_t[k]
+
+        batch_samples[k, :] = q
+        
+        # Add trajectory point at current q (velocities set below)
+        pt = JointTrajectoryPoint()
+        pt.positions = q.tolist()
+        pt.time_from_start = rospy.Duration.from_sec(t)
+
+        # Torch inputs
+        qt = torch.tensor(q[None, :], dtype=torch.float32, device=device, requires_grad=True)
+        tt = torch.tensor(np.asarray([t]), dtype=torch.float32, device=device)  # normalize time to [0,1]
+        gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
+        #rospy.loginfo("qt, tt, gt ready")
+
+        x = build_input(qt, tt, gt)
+
+        # model.apply(enable_dropout) # add dropout to enable stochasticity
+        # with torch.no_grad():
+        V = model(x)  # (1,)
+
+        #rospy.loginfo("V computed: %s", V.shape)
+
+        # grad_q V
+        grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
+        grad_q_np = grad_q.detach().cpu().numpy().reshape(7)
+
+        if not np.all(np.isfinite(grad_q_np)):
+            nan_hits += 1
+            if nan_hits > cfg.max_nan_guard:
+                raise RuntimeError("DGM rollout: too many non-finite gradients; aborting.")
+            # fallback: zero velocity
+            u = np.zeros(7, dtype=np.float64)
+        else:
+            # u* = -0.5 R^{-1} grad
+            u = -0.5 * R_inv * grad_q_np
+
+        # clamp velocities
+        u = clamp(u, -cfg.vel_limits, cfg.vel_limits)
+
+        pt.velocities = u.tolist()
+        traj.joint_trajectory.points.append(pt)
+
+        # integrate forward (except after last point)
+        if k > 0:
+            dt = max(1e-4, batch_t[k] - batch_t[k-1])
+            #dt = torch.from_numpy(np.array(dt, dtype=np.float32)).to(device)
+        if k < rollout_length- 1:
+            u_np = u.detach().cpu().numpy()
+            q = q + dt * u_np
+            q = clamp(q, cfg.joint_min, cfg.joint_max)
+
+        k += 1
+
+    #rospy.loginfo("Rollout sampling done: initial_q: %s, q_hist %s", initial_q.shape, batch_samples.shape)
+
+    #rospy.loginfo("Rollout sampling done. nan_hits: %d / %d", nan_hits, rollout_length)
+
+    return batch_samples
+
+
+
 def sample_valid_q_batch(
         svc,
         active_joints,
@@ -146,6 +281,7 @@ def sample_valid_q_batch(
         )
 
     return np.asarray(collected, dtype=np.float64)
+
 
 
 def main_():
@@ -246,14 +382,25 @@ def main_():
         "/root/catkin_ws/src/object_tracking/models/train_perf_data.csv"
     )
 
-
-    total_validity_checks = 0
-    total_rejected_states = 0
-
     os.makedirs(os.path.dirname(train_perf_data_path), exist_ok=True)
 
     with open(train_perf_data_path, "a") as f:
         f.write(results_preamble)
+
+    group_name = rospy.get_param("~group_name", "panda_arm")
+    ee_link = rospy.get_param("~ee_link", "panda_hand")
+    world_frame = rospy.get_param("~world_frame", "world")
+
+    cfg = RolloutConfig(
+            T=T,
+            dt=0.02,
+            vel_limits=default_vel_limits(),
+            joint_min=panda_joint_limits()[0],
+            joint_max=panda_joint_limits()[1],
+            R_diag=R_diag,
+            max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
+        )
+   
 
     for it in range(1, iters + 1):
 
@@ -295,6 +442,26 @@ def main_():
         t_np = np.sort(t_np.flatten()).reshape((batch, 1))
         g_np = sample_goals(batch)
 
+        resp = MotionPlanResponse()
+        resp.error_code.val = MoveItErrorCodes.SUCCESS
+        resp.planning_time = 0.0
+
+         
+        group = MoveGroupCommander(group_name)
+        active_joints = group.get_active_joints()
+
+        rollout_samples = rollout_sampling_batch( 
+                           batch=batch, 
+                           initial_q=q_np[0],
+                           batch_t=t_np,
+                           cfg=cfg,
+                           goal_pos=g_np[0],
+                           active_joints=active_joints, 
+                           model=model)
+        
+        #rospy.loginfo("Rollout samples, batch shapes: %s, %s", rollout_samples.shape, q_np.shape)
+
+
         pos_cost_np = np.zeros((batch,), dtype=np.float64)
         for i in range(batch):
             try:
@@ -308,7 +475,7 @@ def main_():
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
 
-        q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
+        q = torch.tensor(rollout_samples, dtype=torch.float32, device=device, requires_grad=True)
         t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
         g = torch.tensor(g_np, dtype=torch.float32, device=device)
         l = torch.tensor(l_np, dtype=torch.float32, device=device)
@@ -316,6 +483,8 @@ def main_():
         bt = max(64, batch // 3)
 
         V = model(build_input(q, t, g))
+
+        #rospy.loginfo("V shape: %s", V.shape)
 
         #V = model(build_input(q, t, g), build_input(q, t, g))
 
@@ -356,10 +525,26 @@ def main_():
                 rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
                 phi_np[i] = 1e3
 
-        qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
+        
+
+        
         tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
+        rollout_samples_T = rollout_sampling_batch( 
+                           batch=bt, 
+                           initial_q=qT_np[0],
+                           batch_t=tT.detach().cpu().numpy(),
+                           cfg=cfg,
+                           goal_pos=gT_np[0],
+                           active_joints=active_joints, 
+                           model=model)
+        
+        #rospy.loginfo("Rollout T samples. gT shapes: %s, %s", rollout_samples_T.shape, qT_np.shape)
+
+        qT = torch.tensor(rollout_samples_T, dtype=torch.float32, device=device)
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
+
+        
 
          # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
         # This is a bit hacky but seems to help.
@@ -397,8 +582,8 @@ def main_():
                 float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
-            data_line = (f"{it}.2fs"
-                         f"{float(t_loss_pde) / (itr * (batch + bt))}"
+            data_line = (f"{it}"
+                         f",{float(t_loss_pde) / (itr * (batch + bt))}"
                          f",{float(t_loss_term) / (itr * (batch + bt))}"
                          f",{float(t_loss) / (itr * (batch + bt))}"
                          )

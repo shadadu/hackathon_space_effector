@@ -19,6 +19,6 @@ catkin_install_python(
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 
-install(DIRECTORY launch config
+install(DIRECTORY launch config urdf
   DESTINATION ${CATKIN_PACKAGE_SHARE_DESTINATION}
 )

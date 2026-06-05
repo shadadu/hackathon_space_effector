@@ -8,7 +8,6 @@ import torch
 from torch import optim
 
 from pathlib import Path
-import stat
 
 from moveit_msgs.srv import GetMotionPlan, GetMotionPlanResponse
 from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
@@ -22,7 +21,7 @@ from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
 from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_
 from trajectory_executor_manager import get_panda_start_pose, get_end_translation
-from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy
+from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy, rollout_dgm_batch_joint_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 # from trajectory_executor_manager import panda_extended_open_start_state, euclidean_dist
@@ -84,8 +83,8 @@ def decode(code):
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
     model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    # model = ValueNet(num_layers=18, input_dim=11, output_dim=1, hidden_size=192).to(device)
-    # model = ValueNet_(num_layers=8, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
+    #model = ValueNet(num_layers=64, input_dim=11, output_dim=1, hidden_size=192).to(device)
+    # model = ValueNet_(num_layers=16, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
     opt = optim.Adam(model.parameters(), lr=lr)
     checkpoint = torch.load(str(path.resolve()))
     # Load the model state dictionary from the checkpoint
@@ -221,7 +220,7 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup after ik EE coordinates before init attempt = %s", get_ee_translation())
 
         # DGM model
-        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/objecttracking/models/panda_dgm_v1.pth")
+        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth")
         self.device = rospy.get_param("~device", "cpu")
         self.model = None  # type: DGMValueNet
 
@@ -244,20 +243,17 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup ik proxy before init EE coordinates before init attempt = %s", get_ee_translation())
 
         hidden = int(rospy.get_param("~hidden", 256))
-        depth = int(rospy.get_param("~depth", 10))
-        mdl_path = "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
-        path = Path(mdl_path)
-        # Grant owner read/write, and others read (644)
-        path.chmod(stat.S_IRUSR | stat.S_IWUSR | stat.S_IRGRP | stat.S_IROTH)
+        depth = int(rospy.get_param("~depth", 8))
+        path = Path(self.model_path)
         rospy.loginfo(f"path is a file {path.is_file()}")
-        rospy.loginfo(f"path is accessible {os.access(path, os.X_OK)}")
+        rospy.loginfo(f"path is readable {os.access(path, os.R_OK)}")
         if Path.exists(path):
             self.model = load_model(path=path, hidden=hidden, depth=depth, lr=3e-4, device=self.device)
-            rospy.loginfo("Loaded DGM model: %s", mdl_path)
+            rospy.loginfo("Loaded DGM model: %s", self.model_path)
         else:
             # rospy.loginfo(f"File path exists? {os.path.exists()}")
-            rospy.loginfo("DGM model not found at %s. Planner will return ROBOT_STATE_STALE.", mdl_path)
-            # raise Exception(f"DGM model not found or not loaded via path {mdl_path}. Planner will return ROBOT_STATE_STALE.")
+            rospy.loginfo("DGM model not found at %s. Planner will return ROBOT_STATE_STALE.", self.model_path)
+            # raise Exception(f"DGM model not found or not loaded via path {self.model_path}. Planner will return ROBOT_STATE_STALE.")
 
         if self.use_jacobian_hook:
             rospy.wait_for_service(self.jacobian_service, timeout=60.0)
@@ -535,7 +531,7 @@ class DGMPlannerService:
         rospy.loginfo("start state ee pos: %s ", ee_pos)
         t0 = time.time()
         try:
-            traj, q_hist = rollout_dgm_joint_policy(
+            traj, q_hist = rollout_dgm_batch_joint_policy(
                 model=self.model,
                 q0=q0,
                 goal_pos=goal_pos,

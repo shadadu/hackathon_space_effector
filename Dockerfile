@@ -2,7 +2,8 @@
 # Base image: ROS Noetic (Ubuntu 20.04)
 # =======================================
 #FROM ros:noetic-ros-core
-FROM --platform=linux/amd64 ros:noetic-ros-core
+ARG ROS_PLATFORM=linux/amd64
+FROM --platform=${ROS_PLATFORM} ros:noetic-ros-core
 #FROM --platform=linux/amd64 ros:noetic-desktop-full
 
 # Install basic tools and Python packages
@@ -37,16 +38,16 @@ ENV CATKIN_WS=/root/catkin_ws
 RUN mkdir -p $CATKIN_WS/src
 WORKDIR $CATKIN_WS/src
 
-# Copy the package
-COPY ./astrobee_grasp ./astrobee_grasp
-
 # Initialize workspace properly
 RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_init_workspace"
 
 # =======================================
 # Install Dependencies (CRITICAL STEP)
 # =======================================
-# Install ROS dependencies defined in package.xml
+# Install ROS dependencies from the manifest without invalidating this layer
+# when application source changes.
+RUN mkdir -p ./astrobee_grasp
+COPY ./astrobee_grasp/package.xml ./astrobee_grasp/package.xml
 WORKDIR $CATKIN_WS
 RUN apt-get update && rosdep install --from-paths src --ignore-src -r -y && rm -rf /var/lib/apt/lists/*
 #
@@ -78,12 +79,15 @@ RUN apt-get update && rosdep install --from-paths src --ignore-src -r -y && rm -
 COPY ./requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
 
-
+# Copy application source after dependency installation for fast code rebuilds.
+WORKDIR $CATKIN_WS/src
+COPY ./astrobee_grasp ./astrobee_grasp
 
 # =======================================
 # Build the catkin workspace
 # =======================================
 # Only build ONCE after all dependencies are present
+WORKDIR $CATKIN_WS
 RUN /bin/bash -c "source /opt/ros/noetic/setup.bash && catkin_make"
 
 # Source ROS & catkin automatically for interactive shells

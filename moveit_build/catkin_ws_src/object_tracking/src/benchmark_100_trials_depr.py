@@ -220,7 +220,7 @@ def main():
     vel_scale = float(rospy.get_param("~vel_scale", 0.3))
     acc_scale = float(rospy.get_param("~acc_scale", 0.3))
 
-    out_csv = rospy.get_param("~out_csv", "/root/catkin_ws/src/objecttracking/results/bench_100.csv")
+    out_csv = rospy.get_param("~out_csv", "/root/catkin_ws/src/object_tracking/results/bench_100.csv")
     os.makedirs(os.path.dirname(out_csv), exist_ok=True)
 
     # Start state

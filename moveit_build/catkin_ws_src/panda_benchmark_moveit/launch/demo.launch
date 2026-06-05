@@ -1,6 +1,7 @@
 <launch>
   <arg name="rviz" default="false"/>
   <arg name="use_sim_time" default="false"/>
+  <arg name="start_dgm_planner" default="true"/>
 
   <!-- Start MoveIt server -->
   <include file="$(find panda_benchmark_moveit)/launch/move_group.launch">
@@ -11,6 +12,7 @@
   <node pkg="object_tracking"
         type="dgm_planner_node.py"
         name="dgm_planner"
+        if="$(arg start_dgm_planner)"
         output="screen">
     <param name="service_name" value="/dgm/get_motion_plan"/>
     <param name="group_name" value="panda_arm"/>

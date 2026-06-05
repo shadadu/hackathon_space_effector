@@ -29,9 +29,6 @@ def terminal_loss(V_T, phi_T):
     return ((V_T - phi_T) ** 2).mean()
 
 
-import torch
-
-
 def dist_term(value, min_limit, max_limit):
     """
     value: tensor or scalar
@@ -41,14 +38,10 @@ def dist_term(value, min_limit, max_limit):
     return d ** 2
 
 
-# def terminal_loss_(VT, phi):
-#     VT = VT.reshape(-1)
-#     phi = phi.reshape(-1)
-#     return torch.mean((VT - phi) ** 2)
-
-def terminal_loss_(phi):
+def terminal_loss(VT, phi):
+    VT = VT.reshape(-1)
     phi = phi.reshape(-1)
-    return (phi ** 2).mean()
+    return torch.mean((VT - phi) ** 2)
 
 
 def hjb_residual_loss_(V, q, t, running_cost, R_inv_diag, vel_limits, Cv=0.0, T=1.0):

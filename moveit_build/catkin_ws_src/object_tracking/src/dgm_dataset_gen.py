@@ -145,7 +145,7 @@ def jacobian_at(
 def main():
     rospy.init_node("dgm_dataset_gen", anonymous=True)
 
-    out_path = rospy.get_param("~out", "/root/catkin_ws/src/objecttracking/data/panda_train_withJ.pkl")
+    out_path = rospy.get_param("~out", "/root/catkin_ws/src/object_tracking/data/panda_train_withJ.pkl")
     num_samples = int(rospy.get_param("~num_samples", 2000))
     max_attempts = int(rospy.get_param("~max_attempts", num_samples * 30))
 
