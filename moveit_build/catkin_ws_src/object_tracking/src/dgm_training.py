@@ -178,8 +178,7 @@ def rollout_sampling_batch(
         t = batch_t[k]
 
         batch_samples[k, :] = q
-
-        # Add trajectory point at current q (velocities set below)
+        
         # Add trajectory point at current q (velocities set below)
         pt = JointTrajectoryPoint()
         pt.positions = q.tolist()
