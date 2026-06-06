@@ -257,7 +257,7 @@ def rollout_dgm_batch_joint_policy(
     traj = RobotTrajectory()
     traj.joint_trajectory.joint_names = list(active_joints)
 
-    q_hist = np.zeros((N, 7), dtype=np.float64)
+    
     nan_hits = 0
 
     rospy.loginfo("Initial q_hist: %s", q_hist.shape)
@@ -285,7 +285,10 @@ def rollout_dgm_batch_joint_policy(
     ts = np.concatenate([t_np, tT_np])
     #rospy.loginfo("Initial ts: %s", ts.shape)
 
+    q_hist = np.zeros((batch + bt, 7), dtype=np.float64)
+
     k = 0
+    
     for t in ts:
 
         q_hist[k, :] = q
@@ -311,8 +314,6 @@ def rollout_dgm_batch_joint_policy(
         grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
         grad_q_np = grad_q.detach().cpu().numpy().reshape(7)
 
-
-
         if not np.all(np.isfinite(grad_q_np)):
             nan_hits += 1
             if nan_hits > cfg.max_nan_guard:
@@ -335,11 +336,12 @@ def rollout_dgm_batch_joint_policy(
         rospy.loginfo("goal_pos  = %s, ee_pos = %s, proximity_ee: %s", goal_pos, ee_pos, proximity_ee)
 
         # integrate forward (except after last point)
-        if k == 0:
-            dt = ts[k]
-        if k > 0:
-            dt = max(1e-3, ts[k] - ts[k-1])
+        
         if k < N - 1:
+            if k == 0:
+                dt = ts[k]
+            if k > 0:
+                dt = max(1e-3, ts[k] - ts[k-1])
             q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
 
