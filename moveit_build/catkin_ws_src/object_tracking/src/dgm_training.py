@@ -220,10 +220,8 @@ def rollout_sampling_batch(
         traj.joint_trajectory.points.append(pt)
 
         # integrate forward (except after last point)
-        if k > 0:
-            dt = max(1e-4, batch_t[k] - batch_t[k - 1])
-            # dt = torch.from_numpy(np.array(dt, dtype=np.float32)).to(device)
-        if k < rollout_length - 1:
+        if k < len(batch_t) - 1:
+            dt = max(1e-3, batch_t[k] - batch_t[k-1])
             u_np = u.detach().cpu().numpy()
             q = q + dt * u_np
             q = clamp(q, cfg.joint_min, cfg.joint_max)
