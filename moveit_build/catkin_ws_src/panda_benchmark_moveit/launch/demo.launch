@@ -23,7 +23,7 @@
     <rosparam file="$(find object_tracking)/config/dgm.yaml" command="load"/>
 
     <!-- checkpoint -->
-    <param name="model_path" value="$(find object_tracking)/models/panda_dgm_v1.pth"/>
+    <param name="model_path" value="$(find object_tracking)/models/panda_dgm_v1.pkl"/>
     <param name="device" value="cpu"/>
 
     <!-- (optional for future Jacobian hook; safe even if ignored by code) -->

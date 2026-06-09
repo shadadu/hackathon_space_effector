@@ -27,7 +27,7 @@ MASTER_TIMEOUT="${MASTER_TIMEOUT:-20}"
 ASTROBEE_TIMEOUT="${ASTROBEE_TIMEOUT:-120}"
 MOVEIT_TIMEOUT="${MOVEIT_TIMEOUT:-300}"
 
-DGM_MODEL_PATH="${DGM_MODEL_PATH:-/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth}"
+DGM_MODEL_PATH="${DGM_MODEL_PATH:-/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl}"
 DGM_NODE_NAME="${DGM_NODE_NAME:-dgm_planner_node}"
 DGM_SERVICE_NAME="${DGM_SERVICE_NAME:-/dgm/get_motion_plan}"
 

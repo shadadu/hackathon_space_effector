@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
 import numpy as np
 import math
-import torch
 import rospy
 from trajectory_msgs.msg import JointTrajectoryPoint
 from moveit_msgs.msg import RobotTrajectory
-from typing import List, Tuple, Optional
+from typing import Any, List, Tuple, Optional
 import datetime as datetime
-from .dgm_model import build_input, DGMValueNet, ValueNet, ValueNet_
+from .dgm_jax import policy_grad_q_np
 
 from dataclasses import dataclass
 
@@ -64,10 +63,6 @@ def get_final_joint_state_translation(trajectory):
     except rospy.ServiceException as e:
         rospy.logerr("FK service call failed: %s" % e)
 
-def enable_dropout(m):
-    if isinstance(m, torch.nn.Dropout):
-        m.train()
-
 def clamp(x, lo, hi):
     return np.minimum(np.maximum(x, lo), hi)
 
@@ -94,13 +89,7 @@ def rollout_value_policy(model, q0, goal_pos, active_joints,
 
     for k in range(N):
         t = k * dt
-        # Torch (requires_grad for q)
-        qt = torch.tensor(q[None, :], dtype=torch.float32, device=device, requires_grad=True)
-        tt = torch.tensor([[t / T]], dtype=torch.float32, device=device, requires_grad=True)
-        gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
-
-        V = model(build_input(qt, tt, gt))  # (1,)
-        grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False)[0].detach().cpu().numpy().reshape(7)
+        grad_q = policy_grad_q_np(model, q, t / T, goal_pos)
 
         if not np.all(np.isfinite(grad_q)):
             u = np.zeros(7, dtype=np.float64)
@@ -124,7 +113,7 @@ def rollout_value_policy(model, q0, goal_pos, active_joints,
 
 
 def rollout_dgm_joint_policy(
-        model: ValueNet,
+        model: Any,
         q0: np.ndarray,
         goal_pos: np.ndarray,
         active_joints: List[str],
@@ -161,10 +150,6 @@ def rollout_dgm_joint_policy(
     k = 0
     proximity_ee = float('inf')
 
-    model.apply(enable_dropout)
-
-    model.eval()
-
     while (k < N) and (proximity_threshold < proximity_ee):
         # for k in range(N):
 
@@ -176,20 +161,7 @@ def rollout_dgm_joint_policy(
         pt.positions = q.tolist()
         pt.time_from_start = rospy.Duration.from_sec(t)
 
-        # Torch inputs
-        qt = torch.tensor(q[None, :], dtype=torch.float32, device=device, requires_grad=True)
-        tt = torch.tensor([[t / cfg.T]], dtype=torch.float32, device=device)  # normalize time to [0,1]
-        gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
-
-        x = build_input(qt, tt, gt)
-
-        model.apply(enable_dropout) # add dropout to enable stochasticity
-        # with torch.no_grad():
-        V = model(x)  # (1,)
-
-        # grad_q V
-        grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
-        grad_q_np = grad_q.detach().cpu().numpy().reshape(7)
+        grad_q_np = policy_grad_q_np(model, q, t / cfg.T, goal_pos)
 
         if not np.all(np.isfinite(grad_q_np)):
             nan_hits += 1
@@ -226,7 +198,7 @@ def rollout_dgm_joint_policy(
 
 
 def rollout_dgm_batch_joint_policy(
-        model: ValueNet,
+        model: Any,
         q0: np.ndarray,
         goal_pos: np.ndarray,
         active_joints: List[str],
@@ -272,10 +244,6 @@ def rollout_dgm_batch_joint_policy(
     
     proximity_ee = float('inf')
 
-    model.apply(enable_dropout)
-
-    model.eval()
-
     n_samples = 8
 
     t_np = np.random.uniform(0.0, 1, (batch, 1)).astype(np.float64)
@@ -291,6 +259,7 @@ def rollout_dgm_batch_joint_policy(
     dt = ts[0]
     
     for t in ts:
+        t = float(np.asarray(t).reshape(-1)[0])
 
         q_hist[k, :] = q
 
@@ -299,21 +268,7 @@ def rollout_dgm_batch_joint_policy(
         pt.positions = q.tolist()
         pt.time_from_start = rospy.Duration.from_sec(t)
 
-        # Torch inputs
-        qt = torch.tensor(q[None, :], dtype=torch.float32, device=device, requires_grad=True)
-        tt = torch.tensor([t], dtype=torch.float32, device=device)  # normalize time to [0,1]
-        gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
-        #rospy.loginfo("qt, tt, gt ready")
-
-        x = build_input(qt, tt, gt)
-
-        model.apply(enable_dropout) # add dropout to enable stochasticity
-        # with torch.no_grad():
-        V = model(x)  # (1,)
-
-        # grad_q V
-        grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
-        grad_q_np = grad_q.detach().cpu().numpy().reshape(7)
+        grad_q_np = policy_grad_q_np(model, q, t, goal_pos)
 
         if not np.all(np.isfinite(grad_q_np)):
             nan_hits += 1
@@ -339,7 +294,13 @@ def rollout_dgm_batch_joint_policy(
         # integrate forward (except after last point)
         
         if k < len(ts) - 1:
-            dt = max(1e-3, ts[k] - ts[k-1])
+            if k == 0:
+                dt = max(1e-3, float(np.asarray(ts[k]).reshape(-1)[0]))
+            else:
+                dt = max(
+                    1e-3,
+                    float(np.asarray(ts[k]).reshape(-1)[0] - np.asarray(ts[k - 1]).reshape(-1)[0]),
+                )
             q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
 

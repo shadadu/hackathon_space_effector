@@ -2,17 +2,22 @@
 import os
 import time
 from typing import List
+import jax
 import numpy as np
 import rospy
-import torch
-import torch.optim as optim
 
 from dataclasses import dataclass
 
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
-from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_, build_input, save_checkpoint
-from object_tracking.hjb_loss import hjb_residual_loss, hjb_residual_loss_, terminal_loss
+from object_tracking.dgm_jax import (
+    adam_init,
+    init_mlp_params,
+    make_batch,
+    policy_grad_q_np,
+    save_checkpoint,
+    train_step,
+)
 from object_tracking.fk_client import FKClient
 from datetime import datetime
 
@@ -157,11 +162,9 @@ def rollout_sampling_batch(
     so we need to compute the optimal control u* for each sampled state in order to do rollouts and get the next states.
     """
 
-    rollout_length = batch - len(initial_q)  # how many steps to rollout forward
+    rolls = range(batch)
 
-    rolls = range(rollout_length - 1)
-
-    q = initial_q
+    q = np.asarray(initial_q, dtype=np.float64).copy()
 
     traj = RobotTrajectory()
     traj.joint_trajectory.joint_names = list(active_joints)
@@ -176,7 +179,8 @@ def rollout_sampling_batch(
     dt = batch_t[0]
     for k in rolls:
 
-        t = batch_t[k]
+        t = float(np.asarray(batch_t[k]).reshape(-1)[0])
+        t_norm = t / max(cfg.T, 1e-9)
 
         batch_samples[k, :] = q
 
@@ -185,23 +189,7 @@ def rollout_sampling_batch(
         pt.positions = q.tolist()
         pt.time_from_start = rospy.Duration.from_sec(t)
 
-        # Torch inputs
-        qt = torch.tensor(q[None, :], dtype=torch.float32, device=device, requires_grad=True)
-        tt = torch.tensor(np.asarray([t]), dtype=torch.float32, device=device)  # normalize time to [0,1]
-        gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
-        # rospy.loginfo("qt, tt, gt ready")
-
-        x = build_input(qt, tt, gt)
-
-        # model.apply(enable_dropout) # add dropout to enable stochasticity
-        # with torch.no_grad():
-        V = model(x)  # (1,)
-
-        # rospy.loginfo("V computed: %s", V.shape)
-
-        # grad_q V
-        grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
-        grad_q_np = grad_q.detach().cpu().numpy().reshape(7)
+        grad_q_np = policy_grad_q_np(model, q, t_norm, goal_pos)
 
         if not np.all(np.isfinite(grad_q_np)):
             nan_hits += 1
@@ -221,9 +209,14 @@ def rollout_sampling_batch(
 
         # integrate forward (except after last point)
         if k < len(batch_t) - 1:
-            dt = max(1e-3, batch_t[k] - batch_t[k-1])
-            u_np = u.detach().cpu().numpy()
-            q = q + dt * u_np
+            if k == 0:
+                dt = max(1e-3, float(np.asarray(batch_t[k]).reshape(-1)[0]))
+            else:
+                dt = max(
+                    1e-3,
+                    float(np.asarray(batch_t[k]).reshape(-1)[0] - np.asarray(batch_t[k - 1]).reshape(-1)[0]),
+                )
+            q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
 
         k += 1
@@ -284,7 +277,7 @@ def sample_valid_q_batch(
 def main_():
     rospy.init_node("dgm_pretrain")
 
-    print(f"torch version: {torch.__version__}")
+    print(f"jax version: {jax.__version__}")
     print(f"numpy version: {np.__version__}")
 
     device = rospy.get_param("~device", "cpu")
@@ -307,7 +300,7 @@ def main_():
     Ctr = float(rospy.get_param("~Ctr", 0.01))
     Cpd = float(rospy.get_param("~Cpd", 100.0))
 
-    R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
+    R_diag = np.array(rospy.get_param("~R_diag", [0.15] * 7), dtype=np.float64)
     print(f"R_diag {R_diag}")
     R_inv_diag = 1.0 / R_diag
 
@@ -332,14 +325,12 @@ def main_():
     rospy.wait_for_service(state_validity_service)
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
-    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    # model = ValueNet(num_layers=64, input_dim=11, output_dim=1, hidden_size=192)
-    # model = ValueNet_(num_layers=32, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1)
-
-    opt = optim.Adam(model.parameters(), lr=lr)
+    seed = int(rospy.get_param("~seed", 0))
+    model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=11, hidden=hidden, depth=depth)
+    opt_state = adam_init(model)
 
     t0 = time.time()
-    loss = torch.tensor(0.0, device=device)
+    loss = 0.0
 
     t_loss = 0.0
     t_loss_pde = 0.0
@@ -353,15 +344,18 @@ def main_():
     )
     results_file = now + ".csv"
     data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
-    results_preamble = str(model) + "\n" + \
-                       f"lr:{lr}" + "\n" \
-                                    f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n" + data_header
+    results_preamble = (
+        f"DGMValueNetJAX(in_dim=11, hidden={hidden}, depth={depth})\n"
+        f"lr:{lr}\n"
+        f"Cj:{Cj},Cv:{Cv},Ctr:{Ctr},Cpd:{Cpd}\n"
+        f"{data_header}"
+    )
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
 
     out_path = rospy.get_param(
         "~out_path",
-        "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
+        "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl"
     )
 
     train_perf_data_path = rospy.get_param(
@@ -440,28 +434,7 @@ def main_():
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
 
-        q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
-        t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
-        g = torch.tensor(g_np, dtype=torch.float32, device=device)
-        l = torch.tensor(l_np, dtype=torch.float32, device=device)
-
         bt = max(64, batch // 3)
-
-        x = build_input(q, t, g)
-
-        V = model(x)
-        # V = model(x,x)
-
-        #
-        # loss_pde = hjb_residual_loss_(
-        #     V=V,
-        #     q=q,
-        #     t=t,
-        #     running_cost=l,
-        #     R_inv_diag=R_inv_diag.to(device),
-        #     vel_limits=vel_limits,
-        #     Cv=Cv
-        # )
 
         # Terminal batch
 
@@ -485,40 +458,33 @@ def main_():
                 rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
                 phi_np[i] = 1e3
 
-        qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
-        tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
-        gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
-        phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
+        tT_np = np.ones((bt, 1), dtype=np.float64)
 
         # Sample a few rows from the TC to add to the PDE batch, to help with training stability.
         # This is a bit hacky but seems to help.
         n_samples = 8
-        indices = torch.randperm(bt)[:n_samples]
-        l[-n_samples:] = phi[indices]
+        indices = np.random.permutation(bt)[:n_samples]
+        l_np[-n_samples:] = phi_np[indices]
 
-        loss_pde = hjb_residual_loss(
-            V,
-            q,
-            t,
-            l,
-            R_inv_diag
+        train_batch = make_batch(
+            q_np=q_np,
+            t_np=t_np / T,
+            g_np=g_np,
+            running_cost_np=l_np,
+            q_t_np=qT_np,
+            t_t_np=tT_np,
+            g_t_np=gT_np,
+            phi_t_np=phi_np,
+            r_inv_diag_np=R_inv_diag,
         )
 
-        xT = build_input(qT, tT, gT)
-
-        VT = model(xT)
-
-        loss_term = terminal_loss(VT, phi)
-
-        loss = Cpd * loss_pde + Ctr * loss_term
-        t_loss_pde += loss_pde.item()
-        t_loss_term += loss_term.item()
-        t_loss += loss.item()
-
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        opt.step()
+        model, opt_state, loss, loss_pde, loss_term = train_step(model, opt_state, train_batch, lr, Cpd, Ctr)
+        loss = float(loss)
+        loss_pde = float(loss_pde)
+        loss_term = float(loss_term)
+        t_loss_pde += loss_pde
+        t_loss_term += loss_term
+        t_loss += loss
 
         if it % itr == 0:
             rospy.loginfo(
@@ -544,13 +510,13 @@ def main_():
     f.close()
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    checkpoint = {
-        "epoch": 1,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": opt.state_dict(),
-        "loss": float(loss.item()),
-    }
-    torch.save(checkpoint, out_path)
+    save_checkpoint(
+        out_path,
+        model,
+        opt_state,
+        meta={"in_dim": 11, "hidden": hidden, "depth": depth, "T": T, "framework": "jax"},
+        loss=float(loss),
+    )
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)
     rospy.loginfo("PRE-TRAIN DONE. Saved final: %s", out_path)
@@ -627,29 +593,7 @@ def main_():
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
 
-        q = torch.tensor(rollout_samples, dtype=torch.float32, device=device, requires_grad=True)
-        t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
-        g = torch.tensor(g_np, dtype=torch.float32, device=device)
-        l = torch.tensor(l_np, dtype=torch.float32, device=device)
-
         bt = max(64, batch // 3)
-
-        V = model(build_input(q, t, g))
-
-        # rospy.loginfo("V shape: %s", V.shape)
-
-        # V = model(build_input(q, t, g), build_input(q, t, g))
-
-        #
-        # loss_pde = hjb_residual_loss_(
-        #     V=V,
-        #     q=q,
-        #     t=t,
-        #     running_cost=l,
-        #     R_inv_diag=R_inv_diag.to(device),
-        #     vel_limits=vel_limits,
-        #     Cv=Cv
-        # )
 
         # Terminal batch
 
@@ -673,11 +617,12 @@ def main_():
                 rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
                 phi_np[i] = 1e3
 
-        tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
+        tT_norm_np = np.ones((bt, 1), dtype=np.float64)
+        tT_abs_np = np.full((bt, 1), T, dtype=np.float64)
         rollout_samples_T = rollout_sampling_batch(
             batch=bt,
             initial_q=qT_np[0],
-            batch_t=tT.detach().cpu().numpy(),
+            batch_t=tT_abs_np,
             cfg=cfg,
             goal_pos=gT_np[0],
             active_joints=active_joints,
@@ -685,36 +630,31 @@ def main_():
 
         # rospy.loginfo("Rollout T samples. gT shapes: %s, %s", rollout_samples_T.shape, qT_np.shape)
 
-        qT = torch.tensor(rollout_samples_T, dtype=torch.float32, device=device)
-        gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
-        phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
-
         # Sample a few rows from the TC to add to the PDE batch, to help with training stability.
         # This is a bit hacky but seems to help.
         n_samples = 8
-        indices = torch.randperm(bt)[:n_samples]
-        l[-n_samples:] = phi[indices]
+        indices = np.random.permutation(bt)[:n_samples]
+        l_np[-n_samples:] = phi_np[indices]
 
-        loss_pde = hjb_residual_loss(
-            V,
-            q,
-            t,
-            l,
-            R_inv_diag
+        train_batch = make_batch(
+            q_np=rollout_samples,
+            t_np=t_np / T,
+            g_np=g_np,
+            running_cost_np=l_np,
+            q_t_np=rollout_samples_T,
+            t_t_np=tT_norm_np,
+            g_t_np=gT_np,
+            phi_t_np=phi_np,
+            r_inv_diag_np=R_inv_diag,
         )
 
-        VT = model(build_input(qT, tT, gT))
-        loss_term = terminal_loss(VT, phi)
-
-        loss = Cpd * loss_pde + Ctr * loss_term
-        t_loss_pde += loss_pde.item()
-        t_loss_term += loss_term.item()
-        t_loss += loss.item()
-
-        opt.zero_grad(set_to_none=True)
-        loss.backward()
-        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
-        opt.step()
+        model, opt_state, loss, loss_pde, loss_term = train_step(model, opt_state, train_batch, lr, Cpd, Ctr)
+        loss = float(loss)
+        loss_pde = float(loss_pde)
+        loss_term = float(loss_term)
+        t_loss_pde += loss_pde
+        t_loss_term += loss_term
+        t_loss += loss
 
         if it % itr == 0:
             rospy.loginfo(
@@ -740,13 +680,13 @@ def main_():
     f.close()
 
     os.makedirs(os.path.dirname(out_path), exist_ok=True)
-    checkpoint = {
-        "epoch": 1,
-        "model_state_dict": model.state_dict(),
-        "optimizer_state_dict": opt.state_dict(),
-        "loss": float(loss.item()),
-    }
-    torch.save(checkpoint, out_path)
+    save_checkpoint(
+        out_path,
+        model,
+        opt_state,
+        meta={"in_dim": 11, "hidden": hidden, "depth": depth, "T": T, "framework": "jax"},
+        loss=float(loss),
+    )
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)
     rospy.loginfo("FINE-TUNE DONE. Saved final: %s", out_path)

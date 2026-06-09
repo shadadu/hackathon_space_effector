@@ -36,11 +36,13 @@ RUN apt-get update && apt-get install -y \
     ros-noetic-xacro \
     && rm -rf /var/lib/apt/lists/*
 
-# CPU-only PyTorch for portable Docker hosts. Keep pins compatible with Ubuntu 20.04's Python 3.8.
-RUN pip3 install --no-cache-dir \
-    typing_extensions==4.12.2 \
-    torch==2.4.1+cpu \
-    --index-url https://download.pytorch.org/whl/cpu
+# Ubuntu 20.04's apt pip is too old to resolve some modern manylinux wheels.
+# Keep packaging-tool pins compatible with ROS Noetic's Python 3.8.
+RUN pip3 install --no-cache-dir --upgrade \
+    pip==24.0 \
+    setuptools==68.2.2 \
+    wheel==0.42.0 \
+    importlib-metadata==6.8.0
 
 # Install Python dependencies
 COPY ./requirements.txt /tmp/requirements.txt

@@ -2,10 +2,7 @@
 import os
 import time
 import numpy as np
-# from dgm_model import DGMValueNet
 import rospy
-import torch
-from torch import optim
 
 from pathlib import Path
 
@@ -19,7 +16,7 @@ from sensor_msgs.msg import JointState
 # Optional Jacobian service hook
 from jacobian_server.srv import GetJacobian, GetJacobianRequest
 
-from object_tracking.dgm_model import DGMValueNet, ValueNet, ValueNet_
+from object_tracking.dgm_jax import load_checkpoint
 from trajectory_executor_manager import get_panda_start_pose, get_end_translation
 from object_tracking.dgm_rollout import RolloutConfig, rollout_dgm_joint_policy, rollout_value_policy, rollout_dgm_batch_joint_policy
 from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
@@ -82,15 +79,17 @@ def decode(code):
 
 
 def load_model(path: Path, hidden: int, depth: int, lr: float, device: str = "cpu"):
-    model = DGMValueNet(in_dim=11, hidden=hidden, depth=depth).to(device)
-    #model = ValueNet(num_layers=64, input_dim=11, output_dim=1, hidden_size=192).to(device)
-    # model = ValueNet_(num_layers=16, input_dim=11, output_dim=1, hidden_size=192, expansion_factor=1).to(device)
-    opt = optim.Adam(model.parameters(), lr=lr)
-    checkpoint = torch.load(str(path.resolve()))
-    # Load the model state dictionary from the checkpoint
-    model.load_state_dict(checkpoint['model_state_dict'])
-    opt.load_state_dict(checkpoint['optimizer_state_dict'])
-    model.eval()
+    model, meta = load_checkpoint(str(path.resolve()))
+    ckpt_hidden = int(meta.get("hidden", hidden))
+    ckpt_depth = int(meta.get("depth", depth))
+    if ckpt_hidden != hidden or ckpt_depth != depth:
+        rospy.logwarn(
+            "JAX DGM checkpoint architecture differs from ROS params: checkpoint hidden/depth=%d/%d params=%d/%d",
+            ckpt_hidden,
+            ckpt_depth,
+            hidden,
+            depth,
+        )
     return model
 
 
@@ -220,9 +219,9 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup after ik EE coordinates before init attempt = %s", get_ee_translation())
 
         # DGM model
-        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth")
+        self.model_path = rospy.get_param("~model_path", "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl")
         self.device = rospy.get_param("~device", "cpu")
-        self.model = None  # type: DGMValueNet
+        self.model = None
 
         # Rollout config
         self.T = float(rospy.get_param("~T", 2.0))
