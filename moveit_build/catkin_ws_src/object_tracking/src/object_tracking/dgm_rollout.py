@@ -249,8 +249,10 @@ def rollout_dgm_batch_joint_policy(
 
     rospy.loginfo("Executing DGM Value Net rollout ...")
 
-    N = int(round(cfg.T / cfg.dt)) + 1
+    # N = int(round(cfg.T / cfg.dt)) + 1
+    bt = max(64, batch // 3)
     q = q0.astype(np.float64).copy()
+    q_hist = np.zeros((batch + bt, 7), dtype=np.float64)
 
     rospy.loginfo("Initial joint positions: %s", q.shape)
 
@@ -280,14 +282,13 @@ def rollout_dgm_batch_joint_policy(
     t_np = np.sort(t_np.flatten()).reshape((batch, 1))
     t_np[-n_samples:] = np.ones((n_samples, 1), dtype=np.float64)
     #rospy.loginfo("Initial t_np: %s", t_np.shape)
-    bt = max(64, batch // 3)
+    
     tT_np = np.ones((bt, 1), dtype=np.float64)
     ts = np.concatenate([t_np, tT_np])
     #rospy.loginfo("Initial ts: %s", ts.shape)
 
-    q_hist = np.zeros((batch + bt, 7), dtype=np.float64)
-
     k = 0
+    dt = ts[0]
     
     for t in ts:
 
@@ -337,11 +338,8 @@ def rollout_dgm_batch_joint_policy(
 
         # integrate forward (except after last point)
         
-        if k < N - 1:
-            if k == 0:
-                dt = ts[k]
-            if k > 0:
-                dt = max(1e-3, ts[k] - ts[k-1])
+        if k < len(ts) - 1:
+            dt = max(1e-3, ts[k] - ts[k-1])
             q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
 
