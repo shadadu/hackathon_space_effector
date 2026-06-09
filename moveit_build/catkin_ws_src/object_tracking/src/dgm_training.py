@@ -304,7 +304,7 @@ def main_():
 
     Cj = float(rospy.get_param("~Cj", 0.0))
     Cv = float(rospy.get_param("~Cv", 0.0))
-    Ctr = float(rospy.get_param("~Ctr", 1.0))
+    Ctr = float(rospy.get_param("~Ctr", 0.01))
     Cpd = float(rospy.get_param("~Cpd", 100.0))
 
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
