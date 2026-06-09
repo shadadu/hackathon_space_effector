@@ -29,6 +29,12 @@ To start:
     It also runs diagnostic tests of the pose, intercept, and trajectory planners. 
 2. Run ./stop.sh to stop the services and tear down the stack and free any memory/volumes
 
+nvidia-smi
+
+docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu20.04 nvidia-smi
+
+JAX_VARIANT=cuda12 MOVEIT_ENABLE_GPU=true ./bring_up.sh
+
 # Training DGM
 1. rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=300 _batch:=192
 

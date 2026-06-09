@@ -279,6 +279,7 @@ def main_():
 
     print(f"jax version: {jax.__version__}")
     print(f"numpy version: {np.__version__}")
+    rospy.loginfo("JAX devices: %s", jax.devices())
 
     device = rospy.get_param("~device", "cpu")
     T = float(rospy.get_param("~T", 2.0))

@@ -18,6 +18,8 @@ ROS_MASTER_IMAGE="${ROS_MASTER_IMAGE:-ros:noetic-ros-core}"
 ASTROBEE_IMAGE="${ASTROBEE_IMAGE:-astrobee_grasp:noetic}"
 MOVEIT_IMAGE="${MOVEIT_IMAGE:-moveit_image:noetic}"
 DOCKER_PLATFORM="${DOCKER_PLATFORM:-linux/amd64}"
+JAX_VARIANT="${JAX_VARIANT:-cpu}"
+MOVEIT_ENABLE_GPU="${MOVEIT_ENABLE_GPU:-false}"
 
 ASTROBEE_LAUNCH="${ASTROBEE_LAUNCH:-roslaunch astrobee_grasp perception.launch}"
 MOVEIT_LAUNCH="${MOVEIT_LAUNCH:-roslaunch panda_benchmark_moveit demo.launch rviz:=false start_dgm_planner:=false}"
@@ -141,6 +143,17 @@ PY" >/dev/null 2>&1; then
   done
 }
 
+check_gpu_runtime() {
+  if [[ "$MOVEIT_ENABLE_GPU" != "true" && "$MOVEIT_ENABLE_GPU" != "1" ]]; then
+    return 0
+  fi
+
+  log "Checking Docker NVIDIA GPU runtime"
+  docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu20.04 nvidia-smi >/dev/null \
+    || fail "Docker GPU runtime unavailable. Install/configure NVIDIA Container Toolkit or set MOVEIT_ENABLE_GPU=false."
+  ok "Docker GPU runtime is available"
+}
+
 wait_for_topic_message() {
   local container="$1"
   local topic="$2"
@@ -231,7 +244,16 @@ build_image() {
   local image="$1"
   local dir="$2"
   log "Building image $image from $dir"
-  docker build --platform "$DOCKER_PLATFORM" --build-arg ROS_PLATFORM="$DOCKER_PLATFORM" -t "$image" "$dir"
+  local build_args=(
+    docker build
+    --platform "$DOCKER_PLATFORM"
+    --build-arg "ROS_PLATFORM=$DOCKER_PLATFORM"
+    -t "$image"
+  )
+  if [[ "$dir" == "$MOVEIT_BUILD_DIR" ]]; then
+    build_args+=(--build-arg "JAX_VARIANT=$JAX_VARIANT")
+  fi
+  "${build_args[@]}" "$dir"
   ok "Built image: $image"
 }
 
@@ -264,6 +286,13 @@ start_idle_container() {
     docker_args+=(
       -v "$DGM_MODELS_VOLUME:/root/catkin_ws/src/object_tracking/models"
     )
+    if [[ "$MOVEIT_ENABLE_GPU" == "true" || "$MOVEIT_ENABLE_GPU" == "1" ]]; then
+      docker_args+=(
+        --gpus all
+        -e "NVIDIA_VISIBLE_DEVICES=all"
+        -e "NVIDIA_DRIVER_CAPABILITIES=compute,utility"
+      )
+    fi
   fi
 
   "${docker_args[@]}" "$image" bash -lc "tail -f /dev/null" >/dev/null
@@ -282,7 +311,7 @@ start_dgm_service() {
   if ! ros_exec "$container" "[ -f '$model_path' ]"; then
     warn "DGM model missing. Running short pretrain..."
     ros_bg_exec "$container" "/root/start_logs/dgm_pretrain.log" \
-      "rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=20 _batch:=192"
+      "rosrun object_tracking dgm_training.py _T:=2.0 _iters:=20 _ft_iters:=0 _batch:=192 _out_path:=$model_path"
 
     local start
     start="$(date +%s)"
@@ -376,6 +405,7 @@ log "Workspace: $MAIN_WS"
 cd "$MAIN_WS"
 
 ensure_network
+check_gpu_runtime
 
 ############################################
 # ROS master

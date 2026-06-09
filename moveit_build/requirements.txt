@@ -3,9 +3,6 @@
 # -----------------------------
 numpy>=1.22
 scipy>=1.7
--f https://storage.googleapis.com/jax-releases/jax_releases.html
-jax==0.4.12
-jaxlib==0.4.12
 
 # -----------------------------
 # State Estimation & Geometry

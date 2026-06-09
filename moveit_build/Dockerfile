@@ -1,5 +1,8 @@
 ARG ROS_PLATFORM=linux/amd64
+ARG JAX_VARIANT=cpu
 FROM --platform=${ROS_PLATFORM} ros:noetic
+
+ARG JAX_VARIANT=cpu
 
 ENV DEBIAN_FRONTEND=noninteractive
 
@@ -47,6 +50,26 @@ RUN pip3 install --no-cache-dir --upgrade \
 # Install Python dependencies
 COPY ./requirements.txt /tmp/requirements.txt
 RUN pip3 install --no-cache-dir -r /tmp/requirements.txt
+
+# JAX wheels are installed separately because CPU and CUDA builds use different
+# release indexes on the Python 3.8-compatible JAX line.
+RUN if [ "$JAX_VARIANT" = "cpu" ]; then \
+      pip3 install --no-cache-dir \
+        -f https://storage.googleapis.com/jax-releases/jax_releases.html \
+        jax==0.4.12 \
+        jaxlib==0.4.12; \
+    elif [ "$JAX_VARIANT" = "cuda12" ]; then \
+      pip3 install --no-cache-dir \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html \
+        'jax[cuda12_pip]==0.4.12'; \
+    elif [ "$JAX_VARIANT" = "cuda11" ]; then \
+      pip3 install --no-cache-dir \
+        -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html \
+        'jax[cuda11_pip]==0.4.12'; \
+    else \
+      echo "Unsupported JAX_VARIANT=$JAX_VARIANT; expected cpu, cuda12, or cuda11" >&2; \
+      exit 1; \
+    fi
 
 # Copy application source after large dependency layers so code edits rebuild quickly.
 RUN mkdir -p /root/catkin_ws/src

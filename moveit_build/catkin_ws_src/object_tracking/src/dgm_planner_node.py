@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import time
+import jax
 import numpy as np
 import rospy
 
@@ -209,6 +210,7 @@ def validate_with_moveit_state_validity(
 class DGMPlannerService:
     def __init__(self):
         rospy.loginfo("DGM startup before init EE coordinates before init attempt = %s", get_ee_translation())
+        rospy.loginfo("JAX devices: %s", jax.devices())
         self.robot = RobotCommander()
         self.group_name = rospy.get_param("~group_name", "panda_arm")
         self.ee_link = rospy.get_param("~ee_link", "panda_hand")
