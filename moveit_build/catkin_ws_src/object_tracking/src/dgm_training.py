@@ -28,9 +28,6 @@ from sensor_msgs.msg import JointState
 
 from trajectory_msgs.msg import JointTrajectoryPoint
 
-
-
-
 from dgm_planner_node import (
     validate_with_moveit_state_validity,
     robot_state_from_q,  # needed for single-state validity checks
@@ -40,6 +37,8 @@ from dgm_planner_node import (
 Reference
 1. A. Al Aradi et al. (2018) Solving Nonlinear and High-Dimensional Partial Differential Equations via Deep Learning, pp 41-47
 """
+
+
 def clamp(x, lo, hi):
     return np.minimum(np.maximum(x, lo), hi)
 
@@ -51,6 +50,7 @@ def default_vel_limits():
 
 def finite(x: np.ndarray) -> bool:
     return np.all(np.isfinite(x))
+
 
 def panda_joint_limits():
     jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
@@ -139,15 +139,16 @@ class RolloutConfig:
     R_diag: np.ndarray = None  # (7,)
     max_nan_guard: int = 5
 
-def rollout_sampling_batch( 
-                           batch, 
-                           initial_q, 
-                           batch_t,
-                           cfg,
-                           goal_pos,
-                           active_joints, 
-                           model,
-                           device = "cpu"):
+
+def rollout_sampling_batch(
+        batch,
+        initial_q,
+        batch_t,
+        cfg,
+        goal_pos,
+        active_joints,
+        model,
+        device="cpu"):
     """
     For rollout training, we need to sample initial states and then do a forward rollout 
     using the current policy to get state-action pairs for training.
@@ -158,7 +159,7 @@ def rollout_sampling_batch(
 
     rollout_length = batch - len(initial_q)  # how many steps to rollout forward
 
-    rolls = range(rollout_length-1)
+    rolls = range(rollout_length - 1)
 
     q = initial_q
 
@@ -178,7 +179,7 @@ def rollout_sampling_batch(
         t = batch_t[k]
 
         batch_samples[k, :] = q
-        
+
         # Add trajectory point at current q (velocities set below)
         pt = JointTrajectoryPoint()
         pt.positions = q.tolist()
@@ -188,7 +189,7 @@ def rollout_sampling_batch(
         qt = torch.tensor(q[None, :], dtype=torch.float32, device=device, requires_grad=True)
         tt = torch.tensor(np.asarray([t]), dtype=torch.float32, device=device)  # normalize time to [0,1]
         gt = torch.tensor(goal_pos[None, :], dtype=torch.float32, device=device)
-        #rospy.loginfo("qt, tt, gt ready")
+        # rospy.loginfo("qt, tt, gt ready")
 
         x = build_input(qt, tt, gt)
 
@@ -196,7 +197,7 @@ def rollout_sampling_batch(
         # with torch.no_grad():
         V = model(x)  # (1,)
 
-        #rospy.loginfo("V computed: %s", V.shape)
+        # rospy.loginfo("V computed: %s", V.shape)
 
         # grad_q V
         grad_q = torch.autograd.grad(V.sum(), qt, create_graph=False, retain_graph=False)[0]  # (1,7)
@@ -220,21 +221,20 @@ def rollout_sampling_batch(
 
         # integrate forward (except after last point)
         if k > 0:
-            dt = max(1e-4, batch_t[k] - batch_t[k-1])
-            #dt = torch.from_numpy(np.array(dt, dtype=np.float32)).to(device)
-        if k < rollout_length- 1:
+            dt = max(1e-4, batch_t[k] - batch_t[k - 1])
+            # dt = torch.from_numpy(np.array(dt, dtype=np.float32)).to(device)
+        if k < rollout_length - 1:
             u_np = u.detach().cpu().numpy()
             q = q + dt * u_np
             q = clamp(q, cfg.joint_min, cfg.joint_max)
 
         k += 1
 
-    #rospy.loginfo("Rollout sampling done: initial_q: %s, q_hist %s", initial_q.shape, batch_samples.shape)
+    # rospy.loginfo("Rollout sampling done: initial_q: %s, q_hist %s", initial_q.shape, batch_samples.shape)
 
-    #rospy.loginfo("Rollout sampling done. nan_hits: %d / %d", nan_hits, rollout_length)
+    # rospy.loginfo("Rollout sampling done. nan_hits: %d / %d", nan_hits, rollout_length)
 
     return batch_samples
-
 
 
 def sample_valid_q_batch(
@@ -283,7 +283,6 @@ def sample_valid_q_batch(
     return np.asarray(collected, dtype=np.float64)
 
 
-
 def main_():
     rospy.init_node("dgm_pretrain")
 
@@ -294,6 +293,7 @@ def main_():
     T = float(rospy.get_param("~T", 2.0))
 
     iters = int(rospy.get_param("~iters", 3000))
+    ft_iters = int(rospy.get_param("~ft_iters", 1000))
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 256))
@@ -312,22 +312,11 @@ def main_():
     R_diag = torch.tensor(rospy.get_param("~R_diag", [0.15] * 7), dtype=torch.float32)
     print(f"R_diag {R_diag}")
     R_inv_diag = 1.0 / R_diag
-    
-    vel_limits_np = np.array(
-        rospy.get_param("~vel_limits", [2.0] * 7),
-        dtype=np.float64
-    )
-    vel_limits = torch.tensor(vel_limits_np, dtype=torch.float32, device=device)
 
-    out_path = rospy.get_param(
-        "~out_path",
-        "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth"
-    )
-
-    results_out_path = rospy.get_param(
-        "~results_out_path",
-        "/root/catkin_ws/src/object_tracking/results/dgm_results.csv"
-    )
+    # vel_limits_np = np.array(
+    #     rospy.get_param("~vel_limits", [2.0] * 7),
+    #     dtype=np.float64
+    # )
 
     group_name = rospy.get_param("~group_name", "panda_arm")
 
@@ -388,21 +377,188 @@ def main_():
         f.write(results_preamble)
 
     group_name = rospy.get_param("~group_name", "panda_arm")
-    ee_link = rospy.get_param("~ee_link", "panda_hand")
-    world_frame = rospy.get_param("~world_frame", "world")
 
     cfg = RolloutConfig(
-            T=T,
-            dt=0.02,
-            vel_limits=default_vel_limits(),
-            joint_min=panda_joint_limits()[0],
-            joint_max=panda_joint_limits()[1],
-            R_diag=R_diag,
-            max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
-        )
-   
+        T=T,
+        dt=0.02,
+        vel_limits=default_vel_limits(),
+        joint_min=panda_joint_limits()[0],
+        joint_max=panda_joint_limits()[1],
+        R_diag=R_diag,
+        max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
+    )
 
+    # PRE-TRAIN WITH REGULAR DOMAIN SAMPLING
     for it in range(1, iters + 1):
+
+        # PDE / rollout training batch
+
+        q_np = sample_valid_q_batch(
+            svc=validity_svc,
+            active_joints=joint_names,
+            group_name=group_name,
+            jmin=jmin,
+            jmax=jmax,
+            batch_size=batch,
+        )
+
+        # Optional audit using trajectory validator style.
+        # Since q_np is a stack of states, this checks the whole batch as a "trajectory".
+        ok, first_bad_idx, msg = validate_with_moveit_state_validity(
+            svc=validity_svc,
+            active_joints=joint_names,
+            q_hist=q_np,
+            group_name=group_name,
+            stride=1,
+        )
+        if not ok:
+            rospy.logwarn(
+                "Unexpected invalid state after filtering at index %d: %s. Resampling batch.",
+                first_bad_idx, msg
+            )
+            q_np = sample_valid_q_batch(
+                svc=validity_svc,
+                active_joints=joint_names,
+                group_name=group_name,
+                jmin=jmin,
+                jmax=jmax,
+                batch_size=batch,
+            )
+
+        t_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+        t_np = np.sort(t_np.flatten()).reshape((batch, 1))
+        g_np = sample_goals(batch)
+
+        pos_cost_np = np.zeros((batch,), dtype=np.float64)
+        for i in range(batch):
+            try:
+                p = fk.ee_position(joint_names, q_np[i])
+                e = p - g_np[i]
+                pos_cost_np[i] = 0.5 * Qp * float(np.dot(e, e))
+            except Exception:
+                rospy.logwarn("fk_pos l: couldn't retrieve fk position")
+                pos_cost_np[i] = 1e3
+
+        joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
+        l_np = pos_cost_np + Cj * joint_limit_penalty_np
+
+        q = torch.tensor(q_np, dtype=torch.float32, device=device, requires_grad=True)
+        t = torch.tensor(t_np / T, dtype=torch.float32, device=device, requires_grad=True)
+        g = torch.tensor(g_np, dtype=torch.float32, device=device)
+        l = torch.tensor(l_np, dtype=torch.float32, device=device)
+
+        bt = max(64, batch // 3)
+
+        x = build_input(q, t, g)
+
+        V = model(x)
+        # V = model(x,x)
+
+        #
+        # loss_pde = hjb_residual_loss_(
+        #     V=V,
+        #     q=q,
+        #     t=t,
+        #     running_cost=l,
+        #     R_inv_diag=R_inv_diag.to(device),
+        #     vel_limits=vel_limits,
+        #     Cv=Cv
+        # )
+
+        # Terminal batch
+
+        qT_np = sample_valid_q_batch(
+            svc=validity_svc,
+            active_joints=joint_names,
+            group_name=group_name,
+            jmin=jmin,
+            jmax=jmax,
+            batch_size=bt,
+        )
+        gT_np = sample_goals(bt)
+
+        phi_np = np.zeros((bt,), dtype=np.float64)
+        for i in range(bt):
+            try:
+                p = fk.ee_position(joint_names, qT_np[i])
+                e = p - gT_np[i]
+                phi_np[i] = 0.5 * QpT * float(np.dot(e, e))
+            except Exception:
+                rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
+                phi_np[i] = 1e3
+
+        qT = torch.tensor(qT_np, dtype=torch.float32, device=device)
+        tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
+        gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
+        phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
+
+        # Sample a few rows from the TC to add to the PDE batch, to help with training stability.
+        # This is a bit hacky but seems to help.
+        n_samples = 8
+        indices = torch.randperm(bt)[:n_samples]
+        l[-n_samples:] = phi[indices]
+
+        loss_pde = hjb_residual_loss(
+            V,
+            q,
+            t,
+            l,
+            R_inv_diag
+        )
+
+        xT = build_input(qT, tT, gT)
+
+        VT = model(xT)
+
+        loss_term = terminal_loss(VT, phi)
+
+        loss = Cpd * loss_pde + Ctr * loss_term
+        t_loss_pde += loss_pde.item()
+        t_loss_term += loss_term.item()
+        t_loss += loss.item()
+
+        opt.zero_grad(set_to_none=True)
+        loss.backward()
+        torch.nn.utils.clip_grad_norm_(model.parameters(), 5.0)
+        opt.step()
+
+        if it % itr == 0:
+            rospy.loginfo(
+                "iter=%d  pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs",
+                it,
+                float(t_loss_pde) / (itr * (batch + bt)),
+                float(t_loss_term) / (itr * (batch + bt)),
+                float(t_loss) / (itr * (batch + bt)),
+                time.time() - t0
+            )
+            data_line = (f"{it}.2fs"
+                         f"{float(t_loss_pde) / (itr * (batch + bt))}"
+                         f",{float(t_loss_term) / (itr * (batch + bt))}"
+                         f",{float(t_loss) / (itr * (batch + bt))}"
+                         )
+            with open(train_perf_data_path, "a") as f:
+                f.write(data_line + "\n")
+
+            t_loss_pde = 0.0
+            t_loss_term = 0.0
+            t_loss = 0.0
+
+    f.close()
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    checkpoint = {
+        "epoch": 1,
+        "model_state_dict": model.state_dict(),
+        "optimizer_state_dict": opt.state_dict(),
+        "loss": float(loss.item()),
+    }
+    torch.save(checkpoint, out_path)
+
+    rospy.loginfo("Saved epoch checkpoint: %s", out_path)
+    rospy.loginfo("PRE-TRAIN DONE. Saved final: %s", out_path)
+
+    # FINE TUNING WITH ROLLOUT SAMPLING
+    for it in range(1, ft_iters + 1):
 
         # PDE / rollout training batch
 
@@ -446,21 +602,19 @@ def main_():
         resp.error_code.val = MoveItErrorCodes.SUCCESS
         resp.planning_time = 0.0
 
-         
         group = MoveGroupCommander(group_name)
         active_joints = group.get_active_joints()
 
-        rollout_samples = rollout_sampling_batch( 
-                           batch=batch, 
-                           initial_q=q_np[0],
-                           batch_t=t_np,
-                           cfg=cfg,
-                           goal_pos=g_np[0],
-                           active_joints=active_joints, 
-                           model=model)
-        
-        #rospy.loginfo("Rollout samples, batch shapes: %s, %s", rollout_samples.shape, q_np.shape)
+        rollout_samples = rollout_sampling_batch(
+            batch=batch,
+            initial_q=q_np[0],
+            batch_t=t_np,
+            cfg=cfg,
+            goal_pos=g_np[0],
+            active_joints=active_joints,
+            model=model)
 
+        # rospy.loginfo("Rollout samples, batch shapes: %s, %s", rollout_samples.shape, q_np.shape)
 
         pos_cost_np = np.zeros((batch,), dtype=np.float64)
         for i in range(batch):
@@ -484,11 +638,9 @@ def main_():
 
         V = model(build_input(q, t, g))
 
-        #rospy.loginfo("V shape: %s", V.shape)
+        # rospy.loginfo("V shape: %s", V.shape)
 
-        #V = model(build_input(q, t, g), build_input(q, t, g))
-
-        
+        # V = model(build_input(q, t, g), build_input(q, t, g))
 
         #
         # loss_pde = hjb_residual_loss_(
@@ -502,8 +654,6 @@ def main_():
         # )
 
         # Terminal batch
-
-        
 
         qT_np = sample_valid_q_batch(
             svc=validity_svc,
@@ -525,28 +675,23 @@ def main_():
                 rospy.logwarn("fk_pos phi: couldn't retrieve fk position")
                 phi_np[i] = 1e3
 
-        
-
-        
         tT = torch.ones((bt, 1), dtype=torch.float32, device=device, requires_grad=True)
-        rollout_samples_T = rollout_sampling_batch( 
-                           batch=bt, 
-                           initial_q=qT_np[0],
-                           batch_t=tT.detach().cpu().numpy(),
-                           cfg=cfg,
-                           goal_pos=gT_np[0],
-                           active_joints=active_joints, 
-                           model=model)
-        
-        #rospy.loginfo("Rollout T samples. gT shapes: %s, %s", rollout_samples_T.shape, qT_np.shape)
+        rollout_samples_T = rollout_sampling_batch(
+            batch=bt,
+            initial_q=qT_np[0],
+            batch_t=tT.detach().cpu().numpy(),
+            cfg=cfg,
+            goal_pos=gT_np[0],
+            active_joints=active_joints,
+            model=model)
+
+        # rospy.loginfo("Rollout T samples. gT shapes: %s, %s", rollout_samples_T.shape, qT_np.shape)
 
         qT = torch.tensor(rollout_samples_T, dtype=torch.float32, device=device)
         gT = torch.tensor(gT_np, dtype=torch.float32, device=device)
         phi = torch.tensor(phi_np, dtype=torch.float32, device=device)
 
-        
-
-         # Sample a few rows from the TC to add to the PDE batch, to help with training stability. 
+        # Sample a few rows from the TC to add to the PDE batch, to help with training stability.
         # This is a bit hacky but seems to help.
         n_samples = 8
         indices = torch.randperm(bt)[:n_samples]
@@ -606,7 +751,7 @@ def main_():
     torch.save(checkpoint, out_path)
 
     rospy.loginfo("Saved epoch checkpoint: %s", out_path)
-    rospy.loginfo("DONE. Saved final: %s", out_path)
+    rospy.loginfo("FINE-TUNE DONE. Saved final: %s", out_path)
 
 
 if __name__ == "__main__":
