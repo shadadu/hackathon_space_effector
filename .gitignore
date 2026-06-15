@@ -25,6 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
+.venv/*
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -182,3 +183,7 @@ cython_debug/
 #  refer to https://docs.cursor.com/context/ignore-files
 .cursorignore
 .cursorindexingignore
+/.venv-jax
+.venv-jax/bin/python3.12
+/.venv-jax
+/.venv-jax/bin
