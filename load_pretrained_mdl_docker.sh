@@ -11,7 +11,7 @@ MOVEIT_STATE=$(docker inspect -f '{{.State.Running}}' moveit)
 if [ "$MOVEIT_STATE" == "true" ]; then
     # shellcheck disable=SC2086
     echo $MOVEIT_STATE "$MOVEIT_NAME" "container is running"
-    RESULT_MODEL="${RESULT_DIR:-/home/shad/Documents/results/panda_dgm_v1.pth}"
+    RESULT_MODEL="${RESULT_DIR:-/home/shad/Documents/results/panda_dgm_v1.pkl}"
     docker cp "$RESULT_MODEL" "$MOVEIT_NAME":'$model_path'
 else
     echo "$MOVEIT_STATE" "$MOVEIT_NAME" "container is NOT running"

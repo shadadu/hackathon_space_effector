@@ -7,14 +7,14 @@ ASTROBEE_NAME="${ASTROBEE_NAME:-astrobee}"
 MOVEIT_NAME="${MOVEIT_NAME:-moveit}"
 MODEL_NAME="${MODEL_NAME:-panda_dgm_v1.pth}"
 
-RESULT_MODEL="${RESULT_DIR:-/home/shad/Documents/results/panda_dgm_v1.pth}"
+RESULT_MODEL="${RESULT_DIR:-/home/shad/Documents/results/panda_dgm_v1.pkl}"
 TRAIN_PERF_DATA="${RESULT_DIR:-/home/shad/Documents/results/training_perf_data.csv}"
 
 log() { echo -e "\n\033[1;34m[INFO]\033[0m $*"; }
 ok()  { echo -e "\033[1;32m[PASS]\033[0m $*"; }
 
 #docker cp moveit:'$model_path' "$RESULT_MODEL"
-docker cp moveit:'/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pth' "$RESULT_MODEL"
+docker cp moveit:'/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl' "$RESULT_MODEL"
 log "Model copied to $RESULT_MODEL"
 
 docker cp moveit:'/root/catkin_ws/src/object_tracking/models/train_perf_data.csv' "$TRAIN_PERF_DATA"

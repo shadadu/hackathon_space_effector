@@ -222,7 +222,7 @@ def rollout_dgm_batch_joint_policy(
     rospy.loginfo("Executing DGM Value Net rollout ...")
 
     # N = int(round(cfg.T / cfg.dt)) + 1
-    bt = max(64, batch // 3)
+    bt = max(128, batch // 3)
     q = q0.astype(np.float64).copy()
     q_hist = np.zeros((batch + bt, 7), dtype=np.float64)
 
@@ -252,7 +252,8 @@ def rollout_dgm_batch_joint_policy(
     #rospy.loginfo("Initial t_np: %s", t_np.shape)
     
     tT_np = np.ones((bt, 1), dtype=np.float64)
-    ts = np.concatenate([t_np, tT_np])
+    # ts = t_np
+    ts = np.concatenate([t_np, t_np])
     #rospy.loginfo("Initial ts: %s", ts.shape)
 
     k = 0
@@ -295,12 +296,16 @@ def rollout_dgm_batch_joint_policy(
         
         if k < len(ts) - 1:
             if k == 0:
-                dt = max(1e-3, float(np.asarray(ts[k]).reshape(-1)[0]))
+                dt = float(np.asarray(ts[k]).reshape(-1)[0])
             else:
-                dt = max(
-                    1e-3,
-                    float(np.asarray(ts[k]).reshape(-1)[0] - np.asarray(ts[k - 1]).reshape(-1)[0]),
-                )
+                del_t = float(np.asarray(ts[k]).reshape(-1)[0] - np.asarray(ts[k - 1]).reshape(-1)[0])
+                if del_t > 0: # 
+                    dt = max(
+                        1e-3,
+                        float(np.asarray(batch_t[k]).reshape(-1)[0] - np.asarray(batch_t[k - 1]).reshape(-1)[0]),
+                    )
+                # keep prev dt if del_t is non-positive, to avoid NaNs and instability in rollouts due to bad batch_t samples.
+            rospy.loginfo("Step %d, t = %s, dt = %s", k, t, dt)
             q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
 

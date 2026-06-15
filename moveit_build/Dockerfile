@@ -61,11 +61,29 @@ RUN if [ "$JAX_VARIANT" = "cpu" ]; then \
     elif [ "$JAX_VARIANT" = "cuda12" ]; then \
       pip3 install --no-cache-dir \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html \
-        'jax[cuda12_pip]==0.4.12'; \
+        jax==0.4.12 \
+        'jaxlib==0.4.12+cuda12.cudnn89' \
+        nvidia-cublas-cu12 \
+        nvidia-cuda-cupti-cu12 \
+        nvidia-cuda-nvcc-cu12 \
+        nvidia-cuda-runtime-cu12 \
+        'nvidia-cudnn-cu12>=8.9,<9' \
+        nvidia-cufft-cu12 \
+        nvidia-cusolver-cu12 \
+        nvidia-cusparse-cu12; \
     elif [ "$JAX_VARIANT" = "cuda11" ]; then \
       pip3 install --no-cache-dir \
         -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html \
-        'jax[cuda11_pip]==0.4.12'; \
+        jax==0.4.12 \
+        'jaxlib==0.4.12+cuda11.cudnn86' \
+        'nvidia-cublas-cu11>=11.11' \
+        'nvidia-cuda-cupti-cu11>=11.8' \
+        'nvidia-cuda-nvcc-cu11>=11.8' \
+        'nvidia-cuda-runtime-cu11>=11.8' \
+        'nvidia-cudnn-cu11>=8.8,<9' \
+        'nvidia-cufft-cu11>=10.9' \
+        'nvidia-cusolver-cu11>=11.4' \
+        'nvidia-cusparse-cu11>=11.7'; \
     else \
       echo "Unsupported JAX_VARIANT=$JAX_VARIANT; expected cpu, cuda12, or cuda11" >&2; \
       exit 1; \

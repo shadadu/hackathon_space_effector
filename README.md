@@ -3,19 +3,26 @@ An implementation of a robotic end-effector for micro-gravity environments to in
 Gearing for grasp and move activities inside or outside space stations and modules.  
 
 Stack: 
-1. NASA Astrobee: Github https://github.com/nasa/astrobee, Main site: https://www.nasa.gov/astrobee/
-2. MoveIt: https://moveit.picknik.ai/main/index.html
+1. Micro-gravity free flying object inspired by NASA Astrobee: Github https://github.com/nasa/astrobee, Main site: https://www.nasa.gov/astrobee/
+2. MoveIt Grasping manipulator: https://moveit.picknik.ai/main/index.html
 
 # Platform
-Original platform was MacOS with docker. Robotics platforms such as MoveIt, Gazebo, ROS, don't play very well on MacOS; they're are more functional on Linux/Ubuntu. Migration to Ubuntu VM + Docker is nearly complete.
+WSL2 + Nvidia Cuda + JAX 
 
-Run the below command to launch the perception view in Gazebo. This displays the object without the MoveIt Panda arm.
 
-`
-xhost +local:docker
+# 1. Start Desktop Docker
 
-ASTROBEE_ENABLE_X11=true ASTROBEE_LAUNCH='roslaunch astrobee_grasp gazebo_perception.launch gui:=true' ./bring_up.sh
-`
+# 2. Verify GPU access in Docker
+docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu20.04 nvidia-smi
+
+# 3. Build with GPU JAX
+cd /home/shad/Git/hackathon_space_effector
+docker build -f moveit_build/Dockerfile --build-arg JAX_VARIANT=cuda12 -t moveit_image:noetic moveit_build/
+
+# 4. Run with GPU enabled
+MOVEIT_ENABLE_GPU=true JAX_VARIANT=cuda12 ./bring_up.sh
+
+
 # Coding Assistance
 ChaptGPT 5.2+, Codex
 
@@ -37,6 +44,16 @@ JAX_VARIANT=cuda12 MOVEIT_ENABLE_GPU=true ./bring_up.sh
 
 # Training DGM
 1. rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=300 _batch:=192
+
+
+# Running DGM Planner
+Open separate terminal windows for each command with `docker exec -it moveit bash`
+
+`rosrun object_tracking dgm_planner_node.py _service_name:=/dgm/get_motion_plan _ik_service:=/compute_ik _group_name:=panda_arm _ee_link:=panda_hand _T:=3.0`
+
+`rosrun object_tracking trajectory_executor_manager.py _group_name:=panda_arm _ee_link:=panda_hand _plan_service:=/dgm/get_motion_plan _execute_action:=/execute_trajectory _object_topic:=/object/state _world_frame:=world _max_attempts:=1 _loop_hz:=1.0`
+
+`rosservice call /start_trial "{max_attempts: 1, eps_pos: 0.15, eps_ang: 1.56, eval_window_s: 5.0}"`
 
 # Work in Progress
 1. Improve DGM-HJB training and intercept algorithms.

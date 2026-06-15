@@ -208,14 +208,18 @@ def rollout_sampling_batch(
         traj.joint_trajectory.points.append(pt)
 
         # integrate forward (except after last point)
+
         if k < len(batch_t) - 1:
             if k == 0:
-                dt = max(1e-3, float(np.asarray(batch_t[k]).reshape(-1)[0]))
+                dt = float(np.asarray(batch_t[k]).reshape(-1)[0])
             else:
-                dt = max(
-                    1e-3,
-                    float(np.asarray(batch_t[k]).reshape(-1)[0] - np.asarray(batch_t[k - 1]).reshape(-1)[0]),
-                )
+                del_t = float(np.asarray(batch_t[k]).reshape(-1)[0] - np.asarray(batch_t[k - 1]).reshape(-1)[0])
+                if del_t > 0: # 
+                    dt = max(
+                        1e-3,
+                        float(np.asarray(batch_t[k]).reshape(-1)[0] - np.asarray(batch_t[k - 1]).reshape(-1)[0]),
+                    )
+                # keep prev dt if del_t is non-positive, to avoid NaNs and instability in rollouts due to bad batch_t samples.
             q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)
 
@@ -288,8 +292,8 @@ def main_():
     ft_iters = int(rospy.get_param("~ft_iters", 1000))
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
-    hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 8))
+    hidden = int(rospy.get_param("~hidden", 192))
+    depth = int(rospy.get_param("~depth", 24))
 
     print(f"device: {device}")
 
@@ -299,10 +303,9 @@ def main_():
     Cj = float(rospy.get_param("~Cj", 0.0))
     Cv = float(rospy.get_param("~Cv", 0.0))
     Ctr = float(rospy.get_param("~Ctr", 0.01))
-    Cpd = float(rospy.get_param("~Cpd", 100.0))
+    Cpd = float(rospy.get_param("~Cpd", 1000.0))
 
     R_diag = np.array(rospy.get_param("~R_diag", [0.15] * 7), dtype=np.float64)
-    print(f"R_diag {R_diag}")
     R_inv_diag = 1.0 / R_diag
 
     # vel_limits_np = np.array(
@@ -435,7 +438,7 @@ def main_():
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
 
-        bt = max(64, batch // 3)
+        bt = max(128, batch // 3)
 
         # Terminal batch
 
