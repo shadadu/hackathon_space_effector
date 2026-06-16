@@ -292,8 +292,8 @@ def main_():
     ft_iters = int(rospy.get_param("~ft_iters", 1000))
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
-    hidden = int(rospy.get_param("~hidden", 192))
-    depth = int(rospy.get_param("~depth", 24))
+    hidden = int(rospy.get_param("~hidden", 256))
+    depth = int(rospy.get_param("~depth", 32))
 
     print(f"device: {device}")
 
@@ -302,8 +302,8 @@ def main_():
 
     Cj = float(rospy.get_param("~Cj", 0.0))
     Cv = float(rospy.get_param("~Cv", 0.0))
-    Ctr = float(rospy.get_param("~Ctr", 0.01))
-    Cpd = float(rospy.get_param("~Cpd", 1000.0))
+    Ctr = float(rospy.get_param("~Ctr", 1e-2))
+    Cpd = float(rospy.get_param("~Cpd", 1e3))
 
     R_diag = np.array(rospy.get_param("~R_diag", [0.15] * 7), dtype=np.float64)
     R_inv_diag = 1.0 / R_diag
@@ -499,8 +499,8 @@ def main_():
                 float(t_loss) / (itr * (batch + bt)),
                 time.time() - t0
             )
-            data_line = (f"{it}.2fs"
-                         f"{float(t_loss_pde) / (itr * (batch + bt))}"
+            data_line = (f"{it}"
+                         f",{float(t_loss_pde) / (itr * (batch + bt))}"
                          f",{float(t_loss_term) / (itr * (batch + bt))}"
                          f",{float(t_loss) / (itr * (batch + bt))}"
                          )
