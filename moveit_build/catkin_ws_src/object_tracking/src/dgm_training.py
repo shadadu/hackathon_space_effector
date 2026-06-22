@@ -410,7 +410,7 @@ def main_():
         "~results_dir",
         "/root/catkin_ws/src/object_tracking/results"
     )
-    results_file = now + ".csv"
+   
     data_header = f"time,t_loss_pde,t_loss_term,t_loss\n"
     results_preamble = (
         f"DGMValueNetJAX(in_dim=11, hidden={hidden}, depth={depth})\n"
@@ -419,7 +419,7 @@ def main_():
         f"{data_header}"
     )
 
-    print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
+    print(f"\n results_preamble {results_preamble}")
 
     train_perf_data_path = rospy.get_param(
         "~train_perf_path",
