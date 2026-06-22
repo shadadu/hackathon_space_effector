@@ -83,11 +83,7 @@ running_cost --> hjb_residual_loss --> terminal_cost --> loss = hjb_residual_los
 
 In essence, the Neural Net is trained to generate robot arm joint velocities given current joint and EE states, and the EE goal position. The Euler method is then used to generate the trajectory by iteratively computing q_{k+1} = q_k + u_star_k * dt. Repeated computations should then bring the EE position q_k closer to g_T (within an acceptable proximity tolerance). 
 
-Constraints such as joint velocity limits, valid states, are enforced during data generation at training and also during planing rollouts. Because the residual 
-only reduces to about 20% of its value before plateauing, it is likely that HJB formulation is leaving out significant robotic
-behavior. The direction of improvement going forward is to improve the loss functions and the Initial and Boundary conditions, and 
-constraints to better coverage. Physics Informed Neural Network (PINN) formulations usually include constraint, IC and BC and residual
-losses in the total loss function, so that is direction to explore.
+Constraints such as joint velocity limits, valid states, are enforced during data generation at training and also during planing rollouts. Following Physics Informed Neural Networks(PINNs), there are two (2) loss terms that are used to train the value network: the terminal loss which penalizes deviations of the EE position from the goal position at terminal time T, and the residual or PDE loss which is the residual of the HJB equation. The residual loss thuns ensures that the NN is training to solve the HJB PDE which describes the overall physics behavior of the robot arm, as occuring within the xyz domain bounds. Similar to numerical solutions of a PDE dP/dt = 0, the residual R = dP/dt, hence as the numerical or neural network training improves we expect R -> 0. And so the residual loss can be used to train a NN to approximate a PDE, in this case the HJB. Initial and Terminal Conditions(ICs and TCs), Boundary Conditions (BCs), can be added as additional terms to enable the NN to better capture the physical behaviors. In this robot manipulator solution using HJB formulation, we include the EE goal position as the Terminal Condition. So the NN trains according to loss = loss_pde + Cr * loss_terminal, where Cr is a weighting factor.
 
 # Architecture
 There are mainly two(2) docker containers -- astrobee(emulator) and moveit that communicate by a ros bridge container.
