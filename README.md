@@ -63,10 +63,6 @@ Open separate terminal windows for each command with `docker exec -it moveit bas
 `rosservice call /start_trial "{max_attempts: 1, eps_pos: 0.15, eps_ang: 1.56, eval_window_s: 5.0}"`
 
 # Work in Progress
-1. Improve DGM-HJB training and intercept algorithms.
-2. Ensure DGM better includes valid trajectory and valid/invalid states checking via cost function penalties, constrains 
-    or a neural network prediction.
-3. Improve intercept planning/metrics from proximity to contact and grasping.
 
 # Perfomance Update
 Currently MoveIt's internal motion planners, OOMPL, are able to reach within proximity tolerances of the end-effector goal, while the initial basic
@@ -76,27 +72,18 @@ the next rollout or inference benchmarks.
 
 The Value function V(q, g, t, T) is the Euclidean distance from goal g to the current location q at time t and time limit T. 
 Minimizing the value function in the subsequent time steps brings the end-effector closer to the end goal. Current solver
-uses the Riccati solution of the HJB formulation to compute the control velocities u*. A neural network (DGMValueNet) is trained on 
-data of end-effector goal locations sampled from a xyz boundary region and start and intermediate valid states sampled from the robot arm 
-collision free initial joint states. In essence, the Neural Net is trained to generate robot arm joint state trajectories 
-for given end-effector goal positions.
+uses the Riccati solution of the HJB formulation to compute the control velocities u*. A neural network (DGMValueNetJAX) is trained on 
+data of end-effector start and goal locations sampled from a xyz boundary region and start and intermediate valid states sampled from the robot arm 
+collision free initial joint states. 
 
 The basic HJB-DGM training is an iterative loop that computes the Value Network V, which is then used to obtain the optimal control u* via the Riccati-like 
 equation u* = - Grad(V) * R^-1 * Grad(V)
 
 running_cost --> hjb_residual_loss --> terminal_cost --> loss = hjb_residual_loss + terminal_cost --> update weights V --> Grad V --> Ricatti --> u* --> running_cost
 
-More advanced implementations(see references) essentially replace the Riccati equation for estimating u* with a neural network and train both the 
-Value Net and the Control Net(u*) with an Actor-Critic RL method. 
+In essence, the Neural Net is trained to generate robot arm joint velocities given current joint and EE states, and the EE goal position. The Euler method is then used to generate the trajectory by iteratively computing q_{k+1} = q_k + u_star_k * dt. Repeated computations should then bring the EE position q_k closer to g_T (within an acceptable proximity tolerance). 
 
-Currently, with a well calibrated weights of the terminal and residual losses, we are getting good convergence of the total loss function, though the 
-HJB residual part of the loss seems unstable, the control loss converges smoothly. Smaller learning rates also improve 
-the HJB residual's convergence relative to the terminal loss, but there is still room for improvement.
-Experiments are to be run to see how the relative convergence of terminal and residual losses affects overall trajectory planning
-performance. However, based on the recommendations in the literature, the Actor-Critic method with two(2) neural nets seem to be better solution, 
-and the next major upgrade would be that, after benchmarking the Value Net and Riccati-like method.
-
-Constraints such as joint velocity limits, valid states, are enforced during data generation at training time. Because the residual 
+Constraints such as joint velocity limits, valid states, are enforced during data generation at training and also during planing rollouts. Because the residual 
 only reduces to about 20% of its value before plateauing, it is likely that HJB formulation is leaving out significant robotic
 behavior. The direction of improvement going forward is to improve the loss functions and the Initial and Boundary conditions, and 
 constraints to better coverage. Physics Informed Neural Network (PINN) formulations usually include constraint, IC and BC and residual
@@ -197,4 +184,6 @@ to generate trajectories for intercepting the object. Intercept metrics are then
 3. Beard R. et al. (1997) Galerkin Approximations of the Generalized Hamilton-Jacobi-Bellman Equation
 4. Detorakis, G. I (2024) Practical Aspects on Solving Differential Equations using Deep Learning: A primer
 5. Sirignano, J. et al. (2018) DGM: A deep learning algorithm for solving partial differential equations
+6. Valin, A. (2026) Multi-Trajectory Physics-Informed Neural Networks for HJB equations with hard terminal constraints: Optimal Execution and high-dimensional LQR
+6. Black et al. (2024) Pi0: A Vision-Language-Action Flow Model for General Robot Control
 
