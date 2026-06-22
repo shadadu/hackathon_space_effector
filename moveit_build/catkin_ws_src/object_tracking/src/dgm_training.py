@@ -1,10 +1,13 @@
 #!/usr/bin/env python3
 import os
+import pickle
 import time
 from typing import List
 import jax
+import jax.numpy as jnp
 import numpy as np
 import rospy
+from pathlib import Path
 
 from dataclasses import dataclass
 
@@ -13,11 +16,13 @@ from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 from object_tracking.dgm_jax import (
     adam_init,
     init_mlp_params,
+    load_checkpoint as load_jax_checkpoint,
     make_batch,
     policy_grad_q_np,
     save_checkpoint,
     train_step,
 )
+
 from object_tracking.fk_client import FKClient
 from datetime import datetime
 
@@ -55,6 +60,51 @@ def default_vel_limits():
 
 def finite(x: np.ndarray) -> bool:
     return np.all(np.isfinite(x))
+
+
+def as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    return False
+
+
+def load_pretrain_chkpt(path, hidden=None, depth=None):
+    ckpt_path = Path(path).expanduser()
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"Pretrained DGM checkpoint does not exist: {ckpt_path}")
+
+    model, meta = load_jax_checkpoint(str(ckpt_path))
+
+    ckpt_hidden = meta.get("hidden")
+    ckpt_depth = meta.get("depth")
+    if hidden is not None and ckpt_hidden is not None and int(ckpt_hidden) != int(hidden):
+        rospy.logwarn(
+            "Loaded checkpoint hidden size (%d) differs from ROS param hidden (%d). Using checkpoint params.",
+            int(ckpt_hidden),
+            int(hidden),
+        )
+    if depth is not None and ckpt_depth is not None and int(ckpt_depth) != int(depth):
+        rospy.logwarn(
+            "Loaded checkpoint depth (%d) differs from ROS param depth (%d). Using checkpoint params.",
+            int(ckpt_depth),
+            int(depth),
+        )
+
+    opt_state = adam_init(model)
+    try:
+        with ckpt_path.open("rb") as f:
+            ckpt = pickle.load(f)
+        if "opt_state" in ckpt:
+            opt_state = jax.tree_util.tree_map(jnp.asarray, ckpt["opt_state"])
+    except Exception as exc:
+        rospy.logwarn("Could not restore optimizer state from %s: %s. Reinitializing optimizer.", ckpt_path, exc)
+
+    rospy.loginfo("Loaded pretrained DGM checkpoint: %s", ckpt_path)
+    return model, opt_state, meta
 
 
 def panda_joint_limits():
@@ -296,14 +346,19 @@ def main_():
     device = rospy.get_param("~device", "cpu")
     T = float(rospy.get_param("~T", 2.0))
 
+    load_model = rospy.get_param("~load_model", 0)
     iters = int(rospy.get_param("~iters", 5000))
     ft_iters = int(rospy.get_param("~ft_iters", 1000))
     batch = int(rospy.get_param("~batch", 192))
+    bt_max = int(rospy.get_param("~bt_max", 128))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 192))
     depth = int(rospy.get_param("~depth", 16))
-
-    print(f"device: {device}")
+    out_path = rospy.get_param(
+        "~out_path",
+        "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl"
+    )
+    pretrain_path = rospy.get_param("~pretrain_path", out_path)
 
     Qp = float(rospy.get_param("~Qp", 10.0))
     QpT = float(rospy.get_param("~Qp_terminal", 100.0))
@@ -315,11 +370,6 @@ def main_():
 
     R_diag = np.array(rospy.get_param("~R_diag", [0.15] * 7), dtype=np.float64)
     R_inv_diag = 1.0 / R_diag
-
-    # vel_limits_np = np.array(
-    #     rospy.get_param("~vel_limits", [2.0] * 7),
-    #     dtype=np.float64
-    # )
 
     group_name = rospy.get_param("~group_name", "panda_arm")
 
@@ -338,8 +388,13 @@ def main_():
     validity_svc = rospy.ServiceProxy(state_validity_service, GetStateValidity)
 
     seed = int(rospy.get_param("~seed", 0))
-    model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=11, hidden=hidden, depth=depth)
-    opt_state = adam_init(model)
+    if as_bool(load_model):
+        model, opt_state, _ = load_pretrain_chkpt(pretrain_path, hidden=hidden, depth=depth)
+        rospy.loginfo("Loaded pretrained model from %s. Starting training with this model.", pretrain_path)
+    else:
+        model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=11, hidden=hidden, depth=depth)
+        opt_state = adam_init(model)
+        rospy.loginfo("No pretrained model loaded. Starting training with a new model initialized")
 
     t0 = time.time()
     loss = 0.0
@@ -348,6 +403,7 @@ def main_():
     t_loss_pde = 0.0
     t_loss_term = 0.0
     itr = 50
+    bt = max(bt_max, batch // 3)
 
     now = str(datetime.now()).replace("-", "").replace(" ", ":")
     results_dir = rospy.get_param(
@@ -364,11 +420,6 @@ def main_():
     )
 
     print(f"results_file {results_file}\n \n results_preamble {results_preamble}")
-
-    out_path = rospy.get_param(
-        "~out_path",
-        "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl"
-    )
 
     train_perf_data_path = rospy.get_param(
         "~train_perf_path",
@@ -445,8 +496,6 @@ def main_():
 
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
-
-        bt = max(128, batch // 3)
 
         # Terminal batch
 
@@ -604,8 +653,6 @@ def main_():
 
         joint_limit_penalty_np = batch_joint_limit_penalty(q_np, jmin, jmax)
         l_np = pos_cost_np + Cj * joint_limit_penalty_np
-
-        bt = max(64, batch // 3)
 
         # Terminal batch
 
