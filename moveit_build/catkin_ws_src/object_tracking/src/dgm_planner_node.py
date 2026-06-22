@@ -244,7 +244,7 @@ class DGMPlannerService:
         rospy.loginfo("DGM startup ik proxy before init EE coordinates before init attempt = %s", get_ee_translation())
 
         hidden = int(rospy.get_param("~hidden", 192))
-        depth = int(rospy.get_param("~depth", 24))
+        depth = int(rospy.get_param("~depth", 16))
         path = Path(self.model_path)
         rospy.loginfo(f"path is a file {path.is_file()}")
         rospy.loginfo(f"path is readable {os.access(path, os.R_OK)}")

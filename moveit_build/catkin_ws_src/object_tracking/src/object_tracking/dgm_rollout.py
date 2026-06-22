@@ -204,7 +204,7 @@ def rollout_dgm_batch_joint_policy(
         active_joints: List[str],
         cfg: RolloutConfig,
         proximity_threshold: float = 0.10,
-        batch: int = 256,
+        batch: int = 192,
         device: str = "cpu",
 ) -> Tuple[RobotTrajectory, np.ndarray]:
     """
@@ -302,9 +302,9 @@ def rollout_dgm_batch_joint_policy(
                 if del_t > 0: # 
                     dt = max(
                         1e-3,
-                        float(np.asarray(batch_t[k]).reshape(-1)[0] - np.asarray(batch_t[k - 1]).reshape(-1)[0]),
+                        float(np.asarray(ts[k]).reshape(-1)[0] - np.asarray(ts[k - 1]).reshape(-1)[0]),
                     )
-                # keep prev dt if del_t is non-positive, to avoid NaNs and instability in rollouts due to bad batch_t samples.
+                # keep prev dt if del_t is non-positive, to avoid NaNs and instability in rollouts due to bad ts samples.
             rospy.loginfo("Step %d, t = %s, dt = %s", k, t, dt)
             q = q + dt * u
             q = clamp(q, cfg.joint_min, cfg.joint_max)

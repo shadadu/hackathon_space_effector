@@ -285,15 +285,23 @@ def main_():
     print(f"numpy version: {np.__version__}")
     rospy.loginfo("JAX devices: %s", jax.devices())
 
+    # Configure JAX GPU memory allocation to reduce peak memory usage
+    # Set these environment variables BEFORE importing JAX for best results:
+    # export XLA_FLAGS="--xla_gpu_force_compilation_parallelism=1"
+    # export TF_FORCE_GPU   ` _ALLOW_GROWTH=true
+    rospy.logwarn("GPU Memory Config: Ensure to set XLA_FLAGS and TF_FORCE_GPU_ALLOW_GROWTH environment variables before training")
+    rospy.logwarn("Recommended: export XLA_FLAGS='--xla_gpu_force_compilation_parallelism=1'")
+    rospy.logwarn("Recommended: export TF_FORCE_GPU_ALLOW_GROWTH=true")
+
     device = rospy.get_param("~device", "cpu")
     T = float(rospy.get_param("~T", 2.0))
 
-    iters = int(rospy.get_param("~iters", 3000))
+    iters = int(rospy.get_param("~iters", 5000))
     ft_iters = int(rospy.get_param("~ft_iters", 1000))
     batch = int(rospy.get_param("~batch", 192))
     lr = float(rospy.get_param("~lr", 3e-4))
-    hidden = int(rospy.get_param("~hidden", 256))
-    depth = int(rospy.get_param("~depth", 32))
+    hidden = int(rospy.get_param("~hidden", 192))
+    depth = int(rospy.get_param("~depth", 16))
 
     print(f"device: {device}")
 

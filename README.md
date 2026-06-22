@@ -42,8 +42,15 @@ docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu20.04 nvidia-smi
 
 JAX_VARIANT=cuda12 MOVEIT_ENABLE_GPU=true ./bring_up.sh
 
+# Set these environment variables
+export TF_FORCE_GPU_ALLOW_GROWTH=true
+export XLA_FLAGS="--xla_gpu_force_compilation_parallelism=1"
+
+# Or use the setup script
+source /path/to/setup_training_env.sh
+
 # Training DGM
-1. rosrun object_tracking dgm_pretrain.py _T:=2.0 _iters:=300 _batch:=192
+1. rosrun object_tracking dgm_training.py _T:=2.0 _iters:=300 _ft_iters:=0 _batch:=192
 
 
 # Running DGM Planner
