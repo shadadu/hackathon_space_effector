@@ -1,16 +1,19 @@
 # Space Effector
 An implementation of a robotic end-effector for micro-gravity environments to intercept and grasp objects. 
-Gearing for grasp and move activities inside or outside space stations and modules.  
+Gearing for grasp and move activities inside or outside space stations and modules.
+
+The stack provides a simulation platform for researching and testing micro-gravity environment Hamilton-Jacobi-Bellman (HJB) Optimal Control and Deep Galerkin based trajectory planners and executors.
 
 Stack: 
 1. Micro-gravity free flying object inspired by NASA Astrobee: Github https://github.com/nasa/astrobee, Main site: https://www.nasa.gov/astrobee/
 2. MoveIt Grasping manipulator: https://moveit.picknik.ai/main/index.html
 
 # Platform
-WSL2 + Nvidia Cuda + JAX 
+WSL2 (Windows Support for Linux V2) + Nvidia Cuda + JAX 
 
 
 # 1. Start Desktop Docker
+Ensure settings and resources are configured to use WSL2 and Cuda and can connect
 
 # 2. Verify GPU access in Docker
 docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu20.04 nvidia-smi
@@ -27,7 +30,7 @@ MOVEIT_ENABLE_GPU=true JAX_VARIANT=cuda12 ./bring_up.sh
 ChaptGPT 5.2+, Codex
 
 # Running the services
-The stack provides a simulation platform for researching and testing micro-gravity environment Optimal Control and Deep Learning based trajectory planners and executors.
+
 To start:
 1. In the project root dir, run `JAX_VARIANT=cuda12 MOVEIT_ENABLE_GPU=true ./bring_up.sh` to boot up the docker containers: 
     rosnet(bridge network), ros_master, astrobee_grasp, moveit
