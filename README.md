@@ -62,13 +62,22 @@ Open separate terminal windows for each command with `docker exec -it moveit bas
 
 `rosservice call /start_trial "{max_attempts: 1, eps_pos: 0.15, eps_ang: 1.56, eval_window_s: 5.0}"`
 
-# Work in Progress
 
 # Perfomance Update
 Currently MoveIt's internal motion planners, OOMPL, are able to reach within proximity tolerances of the end-effector goal, while the initial basic
 implementation of DGM (using a simple network) wasn't reaching the proximity tolerances. Since then, the Value Network has been updated 
 to the DGM Layer recommended by the original DGM authors. Cost functions are being experimented with velocity and joint position costs before 
 the next rollout or inference benchmarks. 
+
+# Model
+
+We consider the cases:
+1. Drift velocities v_o = 0: Object is stationary and robot arm base (space-craft) is stationary
+2. Object has non-zero drift velocity and base of robot arm is stationary
+3. Object has constant non-zero drift velocity and base of the robot arm can move (accelerate, decelerate, maintain constant speed) to bring the robot arm within reach of the object
+
+Currently, non-drifting object + stationary robot base is implemented. The main objective is the case where
+both object(constant v_o > 0) and base of robot arm (a >= 0, v_a >= 0) move.  
 
 The Value function V(q, g, t, T) is the Euclidean distance from goal g to the current location q at time t and time limit T. 
 Minimizing the value function in the subsequent time steps brings the end-effector closer to the end goal. Current solver
