@@ -64,10 +64,10 @@ Open separate terminal windows for each command with `docker exec -it moveit bas
 
 
 # Perfomance Update
-Currently MoveIt's internal motion planners, OOMPL, are able to reach within proximity tolerances of the end-effector goal, while the initial basic
-implementation of DGM (using a simple network) wasn't reaching the proximity tolerances. Since then, the Value Network has been updated 
-to the DGM Layer recommended by the original DGM authors. Cost functions are being experimented with velocity and joint position costs before 
-the next rollout or inference benchmarks. 
+
+Sample DGM training loss performance plots are uploaded to the plots folder: https://github.com/shadadu/hackathon_space_effector/tree/main/plots
+
+Inference/rollout benchmark results to be shared soon. 
 
 # Model
 
