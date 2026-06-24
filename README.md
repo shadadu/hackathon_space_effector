@@ -29,28 +29,16 @@ ChaptGPT 5.2+, Codex
 # Running the services
 The stack provides a simulation platform for researching and testing micro-gravity environment Optimal Control and Deep Learning based trajectory planners and executors.
 To start:
-1. In the project root dir, run ./bring_up.sh to boot up the docker containers: 
+1. In the project root dir, run `JAX_VARIANT=cuda12 MOVEIT_ENABLE_GPU=true ./bring_up.sh` to boot up the docker containers: 
     rosnet(bridge network), ros_master, astrobee_grasp, moveit
-    start.sh brings up the stack and runs tests on the environment, and test that
+    This brings up the stack and runs tests on the environment; it tests that
     the servers can communicate via ROS and send and receive messages. 
     It also runs diagnostic tests of the pose, intercept, and trajectory planners. 
 2. Run ./stop.sh to stop the services and tear down the stack and free any memory/volumes
 
-nvidia-smi
-
-docker run --rm --gpus all nvidia/cuda:12.2.0-base-ubuntu20.04 nvidia-smi
-
-JAX_VARIANT=cuda12 MOVEIT_ENABLE_GPU=true ./bring_up.sh
-
-# Set these environment variables
-export TF_FORCE_GPU_ALLOW_GROWTH=true
-export XLA_FLAGS="--xla_gpu_force_compilation_parallelism=1"
-
-# Or use the setup script
-source /path/to/setup_training_env.sh
 
 # Training DGM
-1. rosrun object_tracking dgm_training.py _T:=2.0 _iters:=300 _ft_iters:=0 _batch:=192
+1. rosrun object_tracking dgm_training.py _load_model:=1 _T:=2.0 _iters:=300 _ft_iters:=0 _batch:=192
 
 
 # Running DGM Planner
