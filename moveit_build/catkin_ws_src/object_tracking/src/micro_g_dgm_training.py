@@ -1,0 +1,274 @@
+#!/usr/bin/env python3
+import os
+import pickle
+import time
+from pathlib import Path
+
+import jax
+import jax.numpy as jnp
+import numpy as np
+import rospy
+from moveit_commander import MoveGroupCommander
+from moveit_msgs.srv import GetStateValidity
+
+from dgm_planner_node import robot_state_from_q
+from object_tracking.dgm_jax import init_mlp_params, load_checkpoint, save_checkpoint
+from object_tracking.micro_g_dgm_hjb_loss import adam_init, make_batch, train_step
+
+
+def as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    return False
+
+
+def panda_joint_limits():
+    jmin = np.array([-2.8973, -1.7628, -2.8973, -3.0718, -2.8973, -0.0175, -2.8973], dtype=np.float64)
+    jmax = np.array([2.8973, 1.7628, 2.8973, -0.0698, 2.8973, 3.7525, 2.8973], dtype=np.float64)
+    return jmin, jmax
+
+
+def sample_box(n, lo, hi):
+    lo = np.asarray(lo, dtype=np.float64)
+    hi = np.asarray(hi, dtype=np.float64)
+    return np.random.uniform(lo, hi, (n, lo.shape[0])).astype(np.float64)
+
+
+def is_state_valid(svc, active_joints, q_row, group_name):
+    req = type("Req", (), {})()
+    try:
+        from moveit_msgs.srv import GetStateValidityRequest
+        req = GetStateValidityRequest()
+        req.group_name = group_name
+        req.robot_state = robot_state_from_q(active_joints, q_row)
+        return bool(svc(req).valid)
+    except Exception as exc:
+        rospy.logwarn_throttle(2.0, "State validity check failed; accepting sampled state for now: %s", exc)
+        return True
+
+
+def sample_q_batch(validity_svc, active_joints, group_name, jmin, jmax, batch_size, use_validity):
+    if not use_validity:
+        return np.random.uniform(jmin, jmax, (batch_size, 7)).astype(np.float64)
+
+    rows = []
+    attempts = 0
+    max_attempts = max(100, batch_size * 30)
+    while len(rows) < batch_size and attempts < max_attempts:
+        q = np.random.uniform(jmin, jmax, (7,)).astype(np.float64)
+        attempts += 1
+        if is_state_valid(validity_svc, active_joints, q, group_name):
+            rows.append(q)
+    if len(rows) < batch_size:
+        raise RuntimeError(f"Only sampled {len(rows)}/{batch_size} valid q states")
+    return np.asarray(rows, dtype=np.float64)
+
+
+def jacobian_batch(group, q_np):
+    out = np.zeros((q_np.shape[0], 3, 7), dtype=np.float64)
+    for i in range(q_np.shape[0]):
+        jac = np.asarray(group.get_jacobian_matrix([float(x) for x in q_np[i].tolist()]), dtype=np.float64)
+        if jac.shape[0] < 3:
+            raise RuntimeError(f"Jacobian shape {jac.shape} does not include translational rows")
+        out[i, :, :] = jac[:3, :7]
+    return out
+
+
+def load_pretrain(path):
+    model, meta = load_checkpoint(path)
+    opt_state = adam_init(model)
+    try:
+        with Path(path).open("rb") as f:
+            ckpt = pickle.load(f)
+        if "opt_state" in ckpt:
+            opt_state = jax.tree_util.tree_map(jnp.asarray, ckpt["opt_state"])
+    except Exception as exc:
+        rospy.logwarn("Could not restore optimizer state from %s: %s", path, exc)
+    return model, opt_state, meta
+
+
+def make_training_batch(
+        group,
+        validity_svc,
+        active_joints,
+        group_name,
+        batch,
+        bt,
+        T,
+        jmin,
+        jmax,
+        base_min,
+        base_max,
+        rel_min,
+        rel_max,
+        vo_min,
+        vo_max,
+        R_q_diag,
+        R_b_diag,
+        Qr,
+        QrT,
+        Qv,
+        use_validity,
+):
+    q_np = sample_q_batch(validity_svc, active_joints, group_name, jmin, jmax, batch, use_validity)
+    b_np = sample_box(batch, base_min, base_max)
+    r_np = sample_box(batch, rel_min, rel_max)
+    v_o_np = sample_box(batch, vo_min, vo_max)
+    tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+    jac_np = jacobian_batch(group, q_np)
+
+    running_cost_np = 0.5 * Qr * np.sum(r_np * r_np, axis=1)
+
+    q_t_np = sample_q_batch(validity_svc, active_joints, group_name, jmin, jmax, bt, use_validity)
+    b_t_np = sample_box(bt, base_min, base_max)
+    r_t_np = sample_box(bt, rel_min, rel_max)
+    v_o_t_np = sample_box(bt, vo_min, vo_max)
+    tau_t_np = np.zeros((bt, 1), dtype=np.float64)
+    phi_t_np = 0.5 * QrT * np.sum(r_t_np * r_t_np, axis=1)
+    phi_t_np += 0.5 * Qv * np.sum(v_o_t_np * v_o_t_np, axis=1)
+
+    return make_batch(
+        q_np=q_np,
+        b_np=b_np,
+        r_np=r_np,
+        v_o_np=v_o_np,
+        tau_np=tau_np,
+        jac_ee_np=jac_np,
+        running_cost_np=running_cost_np,
+        q_t_np=q_t_np,
+        b_t_np=b_t_np,
+        r_t_np=r_t_np,
+        v_o_t_np=v_o_t_np,
+        tau_t_np=tau_t_np,
+        phi_t_np=phi_t_np,
+        r_q_diag_np=R_q_diag,
+        r_b_diag_np=R_b_diag,
+    )
+
+
+def main():
+    rospy.init_node("micro_g_dgm_training")
+    rospy.loginfo("JAX devices: %s", jax.devices())
+
+    group_name = rospy.get_param("~group_name", "panda_arm")
+    group = MoveGroupCommander(group_name)
+    active_joints = group.get_active_joints()
+    if len(active_joints) != 7:
+        raise RuntimeError(f"Expected 7 active joints, got {len(active_joints)}: {active_joints}")
+
+    T = float(rospy.get_param("~T", 2.0))
+    iters = int(rospy.get_param("~iters", 5000))
+    batch = int(rospy.get_param("~batch", 192))
+    bt = int(rospy.get_param("~bt", max(64, batch // 3)))
+    lr = float(rospy.get_param("~lr", 3e-4))
+    hidden = int(rospy.get_param("~hidden", 192))
+    depth = int(rospy.get_param("~depth", 24))
+    seed = int(rospy.get_param("~seed", 0))
+    load_model = as_bool(rospy.get_param("~load_model", False))
+    out_path = rospy.get_param(
+        "~out_path",
+        "/root/catkin_ws/src/object_tracking/models/micro_g_dgm_v1.pkl",
+    )
+    pretrain_path = rospy.get_param("~pretrain_path", out_path)
+
+    Qr = float(rospy.get_param("~Qr", 10.0))
+    QrT = float(rospy.get_param("~Qr_terminal", 100.0))
+    Qv = float(rospy.get_param("~Qv_terminal", 0.0))
+    Cpd = float(rospy.get_param("~Cpd", 1e3))
+    Ctr = float(rospy.get_param("~Ctr", 1.0))
+
+    R_q_diag = np.array(rospy.get_param("~R_q_diag", [0.15] * 7), dtype=np.float64)
+    R_b_diag = np.array(rospy.get_param("~R_b_diag", [0.50] * 3), dtype=np.float64)
+
+    jmin, jmax = panda_joint_limits()
+    base_min = np.array(rospy.get_param("~base_min", [-0.50, -0.50, -0.20]), dtype=np.float64)
+    base_max = np.array(rospy.get_param("~base_max", [0.50, 0.50, 0.50]), dtype=np.float64)
+    rel_min = np.array(rospy.get_param("~rel_min", [-0.60, -0.60, -0.60]), dtype=np.float64)
+    rel_max = np.array(rospy.get_param("~rel_max", [0.60, 0.60, 0.60]), dtype=np.float64)
+    vo_min = np.array(rospy.get_param("~vo_min", [-0.05, -0.05, -0.02]), dtype=np.float64)
+    vo_max = np.array(rospy.get_param("~vo_max", [0.05, 0.05, 0.02]), dtype=np.float64)
+
+    use_validity = as_bool(rospy.get_param("~use_state_validity", True))
+    validity_svc = None
+    if use_validity:
+        service = rospy.get_param("~state_validity_service", "/check_state_validity")
+        try:
+            rospy.wait_for_service(service, timeout=10.0)
+            validity_svc = rospy.ServiceProxy(service, GetStateValidity)
+        except Exception as exc:
+            rospy.logwarn("State validity unavailable; sampling q without collision filtering: %s", exc)
+            use_validity = False
+
+    if load_model:
+        model, opt_state, _ = load_pretrain(pretrain_path)
+    else:
+        model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=17, hidden=hidden, depth=depth)
+        opt_state = adam_init(model)
+
+    train_perf_path = rospy.get_param(
+        "~train_perf_path",
+        "/root/catkin_ws/src/object_tracking/models/micro_g_train_perf_data.csv",
+    )
+    os.makedirs(os.path.dirname(train_perf_path), exist_ok=True)
+    with open(train_perf_path, "a") as f:
+        f.write("iter,loss_pde,loss_term,loss,elapsed_s\n")
+
+    t0 = time.time()
+    last_loss = 0.0
+    log_every = int(rospy.get_param("~log_every", 50))
+    for it in range(1, iters + 1):
+        train_batch = make_training_batch(
+            group=group,
+            validity_svc=validity_svc,
+            active_joints=active_joints,
+            group_name=group_name,
+            batch=batch,
+            bt=bt,
+            T=T,
+            jmin=jmin,
+            jmax=jmax,
+            base_min=base_min,
+            base_max=base_max,
+            rel_min=rel_min,
+            rel_max=rel_max,
+            vo_min=vo_min,
+            vo_max=vo_max,
+            R_q_diag=R_q_diag,
+            R_b_diag=R_b_diag,
+            Qr=Qr,
+            QrT=QrT,
+            Qv=Qv,
+            use_validity=use_validity,
+        )
+        model, opt_state, loss, loss_pde, loss_term = train_step(model, opt_state, train_batch, lr, Cpd, Ctr)
+        last_loss = float(loss)
+
+        if it % log_every == 0:
+            elapsed = time.time() - t0
+            rospy.loginfo(
+                "micro_g iter=%d pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs",
+                it, float(loss_pde), float(loss_term), last_loss, elapsed,
+            )
+            with open(train_perf_path, "a") as f:
+                f.write(f"{it},{float(loss_pde)},{float(loss_term)},{last_loss},{elapsed}\n")
+
+    meta = {
+        "format": "micro_g_dgm_v1",
+        "in_dim": 17,
+        "hidden": hidden,
+        "depth": depth,
+        "T": T,
+        "state": "q,b,r,v_o,tau",
+        "controls": "joint_velocity,base_velocity",
+        "framework": "jax",
+    }
+    save_checkpoint(out_path, model, opt_state, meta=meta, loss=last_loss)
+    rospy.loginfo("Saved micro-g DGM checkpoint: %s", out_path)
+
+
+if __name__ == "__main__":
+    main()

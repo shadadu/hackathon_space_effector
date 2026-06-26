@@ -68,5 +68,8 @@ catkin_install_python(
     src/dgm_training.py
     src/dgm_pretrain.py
     src/dgm_dataset_gen.py
+    src/micro_g_dgm_intercept_planner.py
+    src/micro_g_dgm_planner_node.py
+    src/micro_g_dgm_training.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
