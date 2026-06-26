@@ -5,6 +5,12 @@
   <arg name="object_x" default="0.50"/>
   <arg name="object_y" default="0.00"/>
   <arg name="object_z" default="0.25"/>
+  <arg name="object_drift" default="true"/>
+  <arg name="object_vx" default="-0.02"/>
+  <arg name="object_vy" default="0.01"/>
+  <arg name="object_vz" default="0.00"/>
+  <arg name="object_bounce" default="false"/>
+  <arg name="object_clamp_to_bounds" default="false"/>
 
   <!-- ===================== -->
   <!-- Gazebo                -->
@@ -31,6 +37,16 @@
   <!-- ===================== -->
   <!-- Perception Stack      -->
   <!-- ===================== -->
-  <include file="$(find astrobee_grasp)/launch/perception.launch"/>
+  <include file="$(find astrobee_grasp)/launch/perception.launch">
+    <arg name="object_x" value="$(arg object_x)"/>
+    <arg name="object_y" value="$(arg object_y)"/>
+    <arg name="object_z" value="$(arg object_z)"/>
+    <arg name="object_drift" value="$(arg object_drift)"/>
+    <arg name="object_vx" value="$(arg object_vx)"/>
+    <arg name="object_vy" value="$(arg object_vy)"/>
+    <arg name="object_vz" value="$(arg object_vz)"/>
+    <arg name="object_bounce" value="$(arg object_bounce)"/>
+    <arg name="object_clamp_to_bounds" value="$(arg object_clamp_to_bounds)"/>
+  </include>
 
 </launch>

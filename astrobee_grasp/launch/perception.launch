@@ -1,4 +1,13 @@
 <launch>
+  <arg name="object_drift" default="true"/>
+  <arg name="object_vx" default="-0.02"/>
+  <arg name="object_vy" default="0.01"/>
+  <arg name="object_vz" default="0.00"/>
+  <arg name="object_bounce" default="false"/>
+  <arg name="object_clamp_to_bounds" default="false"/>
+  <arg name="object_x" default="0.50"/>
+  <arg name="object_y" default="0.00"/>
+  <arg name="object_z" default="0.25"/>
 
   <!-- ===================== -->
   <!-- Load EKF Parameters   -->
@@ -38,16 +47,15 @@
 
   <node pkg="astrobee_grasp" type="object_simulator.py" name="object_simulator" output="screen">
       <param name="topic" value="/object/state"/>
-      <param name="drift" value="false"/>
-      <param name="init_x" value="0.50"/>
-      <param name="init_y" value="0.00"/>
-      <param name="init_z" value="0.25"/>
+      <param name="drift" value="$(arg object_drift)"/>
+      <param name="vx" value="$(arg object_vx)"/>
+      <param name="vy" value="$(arg object_vy)"/>
+      <param name="vz" value="$(arg object_vz)"/>
+      <param name="bounce" value="$(arg object_bounce)"/>
+      <param name="clamp_to_bounds" value="$(arg object_clamp_to_bounds)"/>
+      <param name="init_x" value="$(arg object_x)"/>
+      <param name="init_y" value="$(arg object_y)"/>
+      <param name="init_z" value="$(arg object_z)"/>
   </node>
-
-    <param name="drift" value="true"/>
-    <param name="vx" value="-0.02"/>
-    <param name="vy" value="0.01"/>
-    <param name="vz" value="0.00"/>
-    <param name="bounce" value="true"/>
 
 </launch>

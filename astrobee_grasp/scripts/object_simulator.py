@@ -9,6 +9,16 @@ def clamp(x, lo, hi):
     return max(lo, min(hi, x))
 
 
+def as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    return bool(value)
+
+
 class ObjectSimulator:
     def __init__(self):
         # Topics / frames
@@ -19,16 +29,17 @@ class ObjectSimulator:
         # Publish rate
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
 
-        # Motion mode
-        self.drift = bool(rospy.get_param("~drift", False))
-        self.bounce = bool(rospy.get_param("~bounce", True))
+        # Motion mode. For HJB/DGM constant-drift tests, use drift=True and bounce=False.
+        self.drift = as_bool(rospy.get_param("~drift", False))
+        self.bounce = as_bool(rospy.get_param("~bounce", False))
+        self.clamp_to_bounds = as_bool(rospy.get_param("~clamp_to_bounds", False))
 
         # Safe default pose for Panda reach testing
         self.x = float(rospy.get_param("~init_x", 0.50))
         self.y = float(rospy.get_param("~init_y", 0.00))
         self.z = float(rospy.get_param("~init_z", 0.25))
 
-        # Constant velocity used only when drift=True
+        # Constant velocity used only when drift=True.
         self.vx = float(rospy.get_param("~vx", -0.02))
         self.vy = float(rospy.get_param("~vy", 0.01))
         self.vz = float(rospy.get_param("~vz", 0.00))
@@ -55,8 +66,9 @@ class ObjectSimulator:
         self.last_t = rospy.Time.now()
 
         rospy.loginfo(
-            "object_simulator started: topic=%s drift=%s init=(%.3f, %.3f, %.3f) vel=(%.3f, %.3f, %.3f)",
-            self.topic, str(self.drift), self.x, self.y, self.z, self.vx, self.vy, self.vz
+            "object_simulator started: topic=%s drift=%s bounce=%s clamp=%s init=(%.3f, %.3f, %.3f) vel=(%.3f, %.3f, %.3f)",
+            self.topic, str(self.drift), str(self.bounce), str(self.clamp_to_bounds),
+            self.x, self.y, self.z, self.vx, self.vy, self.vz
         )
 
     def step(self, dt):
@@ -88,7 +100,7 @@ class ObjectSimulator:
             elif self.z > self.z_max:
                 self.z = self.z_max
                 self.vz *= -1.0
-        else:
+        elif self.clamp_to_bounds:
             self.x = clamp(self.x, self.x_min, self.x_max)
             self.y = clamp(self.y, self.y_min, self.y_max)
             self.z = clamp(self.z, self.z_min, self.z_max)
