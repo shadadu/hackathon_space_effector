@@ -3,6 +3,7 @@ import os
 import pickle
 import time
 from pathlib import Path
+from typing import List
 
 import jax
 import jax.numpy as jnp
@@ -11,10 +12,20 @@ import rospy
 from moveit_commander import MoveGroupCommander
 from moveit_msgs.srv import GetStateValidity
 
-from dgm_planner_node import robot_state_from_q
 from object_tracking.dgm_jax import init_mlp_params, load_checkpoint, save_checkpoint
 from object_tracking.micro_g_dgm_hjb_loss import adam_init, make_batch, train_step
 
+
+from moveit_msgs.msg import RobotState
+from sensor_msgs.msg import JointState
+
+def robot_state_from_q(active_joints, q):
+    state = RobotState()
+    state.joint_state = JointState(
+        name=list(active_joints),
+        position=[float(x) for x in q],
+    )
+    return state
 
 def as_bool(value):
     if isinstance(value, bool):
@@ -128,6 +139,16 @@ def make_training_batch(
     r_t_np = sample_box(bt, rel_min, rel_max)
     v_o_t_np = sample_box(bt, vo_min, vo_max)
     tau_t_np = np.zeros((bt, 1), dtype=np.float64)
+
+    # Sample a few rows from the TC to add to the PDE batch, to help with training stability.
+    # This is a bit hacky but seems to help.
+    n_samples = 12
+    indices = np.random.permutation(bt)[:n_samples]
+    q_np[-n_samples:] = q_t_np[indices]
+    b_t_np[-n_samples:] = b_t_np[indices]
+    r_t_np[-n_samples:] = r_t_np[indices]
+    v_o_t_np[-n_samples:] = v_o_t_np[indices]
+
     phi_t_np = 0.5 * QrT * np.sum(r_t_np * r_t_np, axis=1)
     phi_t_np += 0.5 * Qv * np.sum(v_o_t_np * v_o_t_np, axis=1)
 
