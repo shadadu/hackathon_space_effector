@@ -130,6 +130,7 @@ def make_training_batch(
     r_np = sample_box(batch, rel_min, rel_max)
     v_o_np = sample_box(batch, vo_min, vo_max)
     tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+    tau_np = np.sort(tau_np.flatten()).reshape((batch, 1), stable=True)
     jac_np = jacobian_batch(group, q_np)
 
     running_cost_np = 0.5 * Qr * np.sum(r_np * r_np, axis=1)
