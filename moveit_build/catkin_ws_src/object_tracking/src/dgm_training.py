@@ -38,7 +38,7 @@ from sensor_msgs.msg import JointState
 
 from trajectory_msgs.msg import JointTrajectoryPoint
 
-from dgm_planner_node import (
+from micro_g_dgm_planner_node import (
     validate_with_moveit_state_validity,
     robot_state_from_q,  # needed for single-state validity checks
 )
@@ -353,7 +353,7 @@ def main_():
     bt_max = int(rospy.get_param("~bt_max", 128))
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 192))
-    depth = int(rospy.get_param("~depth", 16))
+    depth = int(rospy.get_param("~depth", 32))
     out_path = rospy.get_param(
         "~out_path",
         "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl"
