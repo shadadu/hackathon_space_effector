@@ -48,6 +48,7 @@ class MicroGDGMPlannerService:
         self.service_name = rospy.get_param("~service_name", "/micro_g_dgm/get_motion_plan")
         self.object_topic = rospy.get_param("~object_topic", "/object/state")
         self.object_max_age_s = float(rospy.get_param("~object_max_age_s", 0.50))
+        self.service_wait_timeout = float(rospy.get_param("~service_wait_timeout", 30.0))
 
         self.T = float(rospy.get_param("~T", 2.0))
         self.dt = float(rospy.get_param("~dt", 0.02))
@@ -79,7 +80,25 @@ class MicroGDGMPlannerService:
         else:
             rospy.logwarn("Micro-g DGM model not found at %s", model_path)
 
-        self.fk = FKClient(service="/compute_fk", ee_link=self.ee_link, frame=self.world_frame)
+        fk_service = rospy.get_param("~fk_service", "/compute_fk")
+        rospy.loginfo(
+            "Waiting up to %.1fs for MoveIt FK service: %s",
+            self.service_wait_timeout,
+            fk_service,
+        )
+        try:
+            self.fk = FKClient(
+                service=fk_service,
+                ee_link=self.ee_link,
+                frame=self.world_frame,
+                timeout=self.service_wait_timeout,
+            )
+        except rospy.ROSException as exc:
+            raise rospy.ROSInitException(
+                "Cannot start micro-g DGM planner without FK service '{}': {}".format(
+                    fk_service, exc
+                )
+            )
         self.srv = rospy.Service(self.service_name, GetMotionPlan, self.handle)
         rospy.loginfo("Micro-g DGM planner service ready: %s", self.service_name)
 
