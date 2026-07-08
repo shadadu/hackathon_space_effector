@@ -67,8 +67,9 @@ class MicroGDGMInterceptPlanner:
         self.world_frame = rospy.get_param("~world_frame", "world")
         self.ee_link = rospy.get_param("~ee_link", "panda_hand")
         self.group_name = rospy.get_param("~group_name", "panda_arm")
-        self.plan_service = rospy.get_param("~plan_service", "/dgm/get_motion_plan")
+        self.plan_service = rospy.get_param("~plan_service", "/micro_g_dgm/get_motion_plan")
         self.ik_service = rospy.get_param("~ik_service", "/compute_ik")
+        self.service_wait_timeout = float(rospy.get_param("~service_wait_timeout", 20.0))
 
         self.latency_s = float(rospy.get_param("~latency_s", 0.15))
         self.object_max_age_s = float(rospy.get_param("~object_max_age_s", 0.50))
@@ -88,8 +89,11 @@ class MicroGDGMInterceptPlanner:
         self.tf_buffer = tf2_ros.Buffer()
         self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
 
-        rospy.wait_for_service(self.ik_service)
-        rospy.wait_for_service(self.plan_service)
+        self.wait_for_required_service(self.ik_service, "MoveIt IK")
+        self.wait_for_required_service(
+            self.plan_service,
+            "micro-g DGM planner (start micro_g_dgm_planner_node.py first)",
+        )
         self.ik = rospy.ServiceProxy(self.ik_service, GetPositionIK)
         self.plan = rospy.ServiceProxy(self.plan_service, GetMotionPlan)
 
@@ -100,6 +104,23 @@ class MicroGDGMInterceptPlanner:
         self.thread = threading.Thread(target=self.loop, daemon=True)
         self.thread.start()
         rospy.loginfo("Micro-g DGM InterceptPlanner running.")
+
+    def wait_for_required_service(self, service_name, description):
+        rospy.loginfo(
+            "Waiting up to %.1fs for %s service: %s",
+            self.service_wait_timeout,
+            description,
+            service_name,
+        )
+        try:
+            rospy.wait_for_service(service_name, timeout=self.service_wait_timeout)
+        except rospy.ROSException as exc:
+            raise rospy.ROSInitException(
+                "Timed out waiting for {} at '{}': {}".format(
+                    description, service_name, exc
+                )
+            )
+        rospy.loginfo("Connected to service: %s", service_name)
 
     def cb_object(self, msg):
         self.last_odom = msg
