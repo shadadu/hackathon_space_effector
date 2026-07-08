@@ -69,6 +69,33 @@ def jacobian_from_group(group: Any, q: np.ndarray):
         raise RuntimeError(f"Expected at least 3 Jacobian rows, got shape {jac.shape}")
     return jac[:3, :7]
 
+def get_final_joint_state_translation(trajectory):
+    rospy.wait_for_service('compute_fk')
+    fk_srv = rospy.ServiceProxy('compute_fk', GetPositionFK)
+
+    last_point = trajectory.joint_trajectory.points[-1]
+    rospy.loginfo("Joint state last_point = %s", last_point)
+
+    # Build the RobotState message
+    robot_state = RobotState()
+    robot_state.joint_state.name = trajectory.joint_trajectory.joint_names
+    robot_state.joint_state.position = last_point.positions
+
+    # Create the FK Request
+    request = GetPositionFKRequest()
+    request.fk_link_names = ["panda_hand"]
+    request.robot_state = robot_state
+
+    try:
+        response = fk_srv(request)
+        if response.error_code.val == 1:  # SUCCESS
+            translation = response.pose_stamped[0].pose.position
+            orientation = response.pose_stamped[0].pose.orientation
+            print(f"Joint State EE Position: x={translation.x}, y={translation.y}, z={translation.z}")
+            return translation, orientation
+    except rospy.ServiceException as e:
+        rospy.logerr("FK service call failed: %s" % e)
+
 
 def rollout_micro_g_dgm_policy(
         model: Any,
@@ -88,11 +115,25 @@ def rollout_micro_g_dgm_policy(
     each step. That is the hook used by a receding-horizon planner to re-estimate
     p_o and v_o every planning cycle.
     """
+
+    rospy.loginfo("Rollout micro-g DGM policy with q0=%s, b0=%s, object_odom=%s", q0, b0, object_odom)
     q = np.asarray(q0, dtype=np.float64).reshape(7).copy()
     b = np.asarray(b0, dtype=np.float64).reshape(3).copy()
     p_o, v_o, stamp = object_state_from_odom(object_odom)
 
+    batch = 192
+    bt = max(64, batch // 3)
+    n_samples = 12
+    t_np = np.random.uniform(0.0, 1, (batch, 1)).astype(np.float64)
+    t_np = np.sort(t_np.flatten()).reshape((batch, 1))
+    # t_np[-n_samples:] = np.ones((n_samples, 1), dtype=np.float64)
+    
+    tT_np = np.ones((bt, 1), dtype=np.float64)
+    # ts = t_np
+    ts = np.concatenate([t_np, tT_np])
+
     N = int(round(cfg.T / cfg.dt)) + 1
+    N = max(N, len(ts))
     q_hist = np.zeros((N, 7), dtype=np.float64)
     b_hist = np.zeros((N, 3), dtype=np.float64)
     r_hist = np.zeros((N, 3), dtype=np.float64)
@@ -100,18 +141,26 @@ def rollout_micro_g_dgm_policy(
     traj = RobotTrajectory()
     traj.joint_trajectory.joint_names = list(active_joints)
 
+    k = 0
+    dt = ts[k]
     nan_hits = 0
-    for k in range(N):
-        t = k * cfg.dt
+    # for k in range(N):
+    for t in ts:
+
+        # t = k * cfg.dt
         tau = max(0.0, cfg.T - t)
+        rospy.loginfo("Rollout step %d/%d: t=%s, tau=%s", k, N, t, tau)
 
         latest_odom = get_latest_object_state(object_odom, object_state_provider)
+        p_o = None
         if latest_odom is not object_odom:
             object_odom = latest_odom
             p_o, v_o, stamp = object_state_from_odom(object_odom)
         else:
             msg_age = (rospy.Time.now() - stamp).to_sec()
             p_o, v_o = predict_object_state(object_odom, msg_age + t)
+
+        rospy.loginfo("Predicted object state at t=%s: p_o=%s, v_o=%s", t, p_o, v_o)
 
         if fk_client is None:
             pose = group.get_current_pose().pose
@@ -122,10 +171,12 @@ def rollout_micro_g_dgm_policy(
         r = p_ee - p_o
         jac = jacobian_from_group(group, q)
 
+
         q_hist[k, :] = q
         b_hist[k, :] = b
         r_hist[k, :] = r
 
+        
         u_q, u_b = policy_np(
             model,
             q,
@@ -147,6 +198,7 @@ def rollout_micro_g_dgm_policy(
             u_q = np.zeros(7, dtype=np.float64)
             u_b = np.zeros(3, dtype=np.float64)
 
+        rospy.loginfo("Rollout step %d: u_q=%s, u_b=%s", k, u_q, u_b)
         u_q = clamp(u_q, -cfg.joint_vel_limits, cfg.joint_vel_limits)
         u_b = clamp(u_b, -cfg.base_vel_limits, cfg.base_vel_limits)
 
@@ -164,11 +216,33 @@ def rollout_micro_g_dgm_policy(
             break
 
         if k < N - 1:
+            # q = q + cfg.dt * u_q
+            # b = b + cfg.dt * u_b
+
+            if k == 0:
+                dt = float(np.asarray(ts[k]).reshape(-1)[0])
+            else:
+                del_t = float(np.asarray(ts[k]).reshape(-1)[0] - np.asarray(ts[k - 1]).reshape(-1)[0])
+                if del_t > 0: # 
+                    dt = max(
+                        1e-3,
+                        float(np.asarray(ts[k]).reshape(-1)[0] - np.asarray(ts[k - 1]).reshape(-1)[0]),
+                    )
+                # keep prev dt if del_t is non-positive, to avoid NaNs and instability in rollouts due to bad ts samples.
+
             q = q + cfg.dt * u_q
             b = b + cfg.dt * u_b
             if cfg.joint_min is not None and cfg.joint_max is not None:
                 q = clamp(q, cfg.joint_min, cfg.joint_max)
             if cfg.base_min is not None and cfg.base_max is not None:
                 b = clamp(b, cfg.base_min, cfg.base_max)
+
+        
+        # ee_pos, _ = get_final_joint_state_translation(traj)
+        # proximity_ee = np.linalg.norm(rs)
+
+        rospy.loginfo("p_o  = %s, b = %s, ee_pos = %s", p_o, b, p_ee)
+        # rospy.loginfo(f"micro-g DGM rollout: t={t:.3f}, tau={tau:.3f}, r={r}, v_rel={v_rel}, u_q={u_q}, u_b={u_b}")
+        k += 1
 
     return traj, q_hist, b_hist, r_hist
