@@ -7,6 +7,9 @@
   <arg name="ee_link" default="panda_hand"/>
   <arg name="world_frame" default="world"/>
   <arg name="object_topic" default="/object/state"/>
+  <arg name="base_odom_topic" default="/base/odom"/>
+  <arg name="base_odom_max_age_s" default="0.50"/>
+  <arg name="tf_timeout" default="0.20"/>
   <arg name="T" default="2.0"/>
   <arg name="dt" default="0.02"/>
   <arg name="reach_min" default="0.20"/>
@@ -26,6 +29,9 @@
     <param name="ee_link" value="$(arg ee_link)"/>
     <param name="world_frame" value="$(arg world_frame)"/>
     <param name="object_topic" value="$(arg object_topic)"/>
+    <param name="base_odom_topic" value="$(arg base_odom_topic)"/>
+    <param name="base_odom_max_age_s" value="$(arg base_odom_max_age_s)"/>
+    <param name="tf_timeout" value="$(arg tf_timeout)"/>
     <param name="model_path" value="$(arg model_path)"/>
     <param name="T" value="$(arg T)"/>
     <param name="dt" value="$(arg dt)"/>
