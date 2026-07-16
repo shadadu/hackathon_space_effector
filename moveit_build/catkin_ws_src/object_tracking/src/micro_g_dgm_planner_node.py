@@ -12,7 +12,13 @@ from nav_msgs.msg import Odometry
 
 from object_tracking.dgm_jax import load_checkpoint
 from object_tracking.fk_client import FKClient
-from object_tracking.micro_g_dgm_rollout import MicroGRolloutConfig, rollout_micro_g_dgm_policy
+from object_tracking.micro_g_dgm_rollout import (
+    MicroGRolloutConfig,
+    is_target_reachable,
+    object_state_from_odom,
+    rollout_micro_g_dgm_policy,
+    target_reach_distance,
+)
 
 
 def clamp(x, lo, hi):
@@ -27,6 +33,16 @@ def panda_joint_limits():
 
 def default_joint_vel_limits():
     return np.array([1.5, 1.5, 1.5, 1.8, 1.8, 2.0, 2.0], dtype=np.float64)
+
+
+def as_bool(value):
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, (int, float)):
+        return value != 0
+    if isinstance(value, str):
+        return value.strip().lower() in ("1", "true", "yes", "y", "on")
+    return False
 
 
 def odom_from_goal(goal_pos, frame_id):
@@ -62,6 +78,10 @@ class MicroGDGMPlannerService:
         self.base_min = np.array(rospy.get_param("~base_min", [-0.50, -0.50, -0.20]), dtype=np.float64)
         self.base_max = np.array(rospy.get_param("~base_max", [0.50, 0.50, 0.50]), dtype=np.float64)
         self.base_position = np.array(rospy.get_param("~base_position", [0.0, 0.0, 0.0]), dtype=np.float64)
+        self.reach_min = float(rospy.get_param("~reach_min", 0.20))
+        self.reach_max = float(rospy.get_param("~reach_max", 0.75))
+        self.reach_margin = float(rospy.get_param("~reach_margin", 0.02))
+        self.hard_reachability_checks = as_bool(rospy.get_param("~hard_reachability_checks", True))
 
         self.jmin, self.jmax = panda_joint_limits()
         self.last_odom = None
@@ -127,6 +147,14 @@ class MicroGDGMPlannerService:
         s_map = dict(zip(st.joint_state.name, st.joint_state.position))
         return np.array([s_map[j] for j in active_joints], dtype=np.float64)
 
+    def can_enter_reach_shell_within_horizon(self, object_odom):
+        p_o, v_o, _ = object_state_from_odom(object_odom)
+        dist_now = target_reach_distance(self.base_position, p_o)
+        range_change_budget = (float(np.linalg.norm(self.base_vel_limits)) + float(np.linalg.norm(v_o))) * self.T
+        too_far = dist_now > self.reach_max + self.reach_margin + range_change_budget
+        too_near = dist_now < self.reach_min - self.reach_margin - range_change_budget
+        return not (too_far or too_near), dist_now, range_change_budget
+
     def handle(self, req):
         mpr = req.motion_plan_request
         resp = MotionPlanResponse()
@@ -152,6 +180,27 @@ class MicroGDGMPlannerService:
         if object_odom is None:
             object_odom = odom_from_goal(goal_pos, self.world_frame)
 
+        if self.hard_reachability_checks:
+            reachable_by_horizon, dist_now, budget = self.can_enter_reach_shell_within_horizon(object_odom)
+            if not reachable_by_horizon:
+                rospy.logwarn(
+                    "Rejecting micro-g request: object/base distance %.3f m cannot enter reach shell [%.3f, %.3f] m within T=%.3f s; range-change budget %.3f m",
+                    dist_now,
+                    self.reach_min,
+                    self.reach_max,
+                    self.T,
+                    budget,
+                )
+                resp.error_code.val = MoveItErrorCodes.GOAL_CONSTRAINTS_VIOLATED
+                return GetMotionPlanResponse(motion_plan_response=resp)
+            if not is_target_reachable(dist_now, self.reach_min, self.reach_max, self.reach_margin):
+                rospy.loginfo(
+                    "Object/base distance %.3f m starts outside reach shell [%.3f, %.3f] m but can plausibly enter within horizon",
+                    dist_now,
+                    self.reach_min,
+                    self.reach_max,
+                )
+
         cfg = MicroGRolloutConfig(
             T=self.T,
             dt=self.dt,
@@ -165,6 +214,10 @@ class MicroGDGMPlannerService:
             base_max=self.base_max,
             grasp_pos_tol=float(rospy.get_param("~grasp_pos_tol", 0.08)),
             grasp_vel_tol=float(rospy.get_param("~grasp_vel_tol", 0.05)),
+            reach_min=self.reach_min,
+            reach_max=self.reach_max,
+            reach_margin=self.reach_margin,
+            require_final_reachable=self.hard_reachability_checks,
             max_nan_guard=int(rospy.get_param("~max_nan_guard", 5)),
         )
 

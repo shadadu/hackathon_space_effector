@@ -9,6 +9,10 @@
   <arg name="object_topic" default="/object/state"/>
   <arg name="T" default="2.0"/>
   <arg name="dt" default="0.02"/>
+  <arg name="reach_min" default="0.20"/>
+  <arg name="reach_max" default="0.75"/>
+  <arg name="reach_margin" default="0.02"/>
+  <arg name="hard_reachability_checks" default="true"/>
   <arg name="service_wait_timeout" default="30.0"/>
 
   <node pkg="object_tracking"
@@ -25,6 +29,10 @@
     <param name="model_path" value="$(arg model_path)"/>
     <param name="T" value="$(arg T)"/>
     <param name="dt" value="$(arg dt)"/>
+    <param name="reach_min" value="$(arg reach_min)"/>
+    <param name="reach_max" value="$(arg reach_max)"/>
+    <param name="reach_margin" value="$(arg reach_margin)"/>
+    <param name="hard_reachability_checks" value="$(arg hard_reachability_checks)"/>
     <param name="service_wait_timeout" value="$(arg service_wait_timeout)"/>
   </node>
 

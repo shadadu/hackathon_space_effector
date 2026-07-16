@@ -53,6 +53,18 @@ Open separate terminal windows for each command with `docker exec -it moveit bas
 
 `rosservice call /start_trial "{max_attempts: 1, eps_pos: 0.15, eps_ang: 1.56, eval_window_s: 5.0}"`
 
+## Running the Micro-g DGM Intercept Planner
+
+The micro-g intercept node consumes a planning service; it does not advertise that
+service itself. Start the micro-g planner and intercept nodes together with:
+
+`roslaunch object_tracking micro_g_dgm_intercept.launch T:=2.0 model_path:=/root/catkin_ws/src/object_tracking/models/micro_g_dgm_v1.pkl`
+
+To run the nodes in separate terminals, start `micro_g_dgm_planner_node.py` first,
+then `micro_g_dgm_intercept_planner.py`. Verify the endpoint with:
+
+`rosservice info /micro_g_dgm/get_motion_plan`
+
 
 # Perfomance Update
 
@@ -182,4 +194,3 @@ to generate trajectories for intercepting the object. Intercept metrics are then
 5. Sirignano, J. et al. (2018) DGM: A deep learning algorithm for solving partial differential equations
 6. Valin, A. (2026) Multi-Trajectory Physics-Informed Neural Networks for HJB equations with hard terminal constraints: Optimal Execution and high-dimensional LQR
 6. Black et al. (2024) Pi0: A Vision-Language-Action Flow Model for General Robot Control
-
