@@ -25,7 +25,7 @@ share/python-wheels/
 .installed.cfg
 *.egg
 MANIFEST
-.venv/*
+.venv-jax/*
 
 # PyInstaller
 #  Usually these files are written by a python script from a template
@@ -187,3 +187,5 @@ cython_debug/
 .venv-jax/bin/python3.12
 /.venv-jax
 /.venv-jax/bin
+/.venv-jax
+.venv-jax/bin/python
