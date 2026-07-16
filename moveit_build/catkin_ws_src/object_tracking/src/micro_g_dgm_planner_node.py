@@ -4,6 +4,7 @@ from pathlib import Path
 
 import numpy as np
 import rospy
+import tf2_ros
 from geometry_msgs.msg import Point
 from moveit_commander import MoveGroupCommander, RobotCommander
 from moveit_msgs.msg import MotionPlanResponse, MoveItErrorCodes
@@ -55,6 +56,29 @@ def odom_from_goal(goal_pos, frame_id):
     return odom
 
 
+def frame_id_equal(a, b):
+    return (a or "").lstrip("/") == (b or "").lstrip("/")
+
+
+def point_to_np(point):
+    return np.array([point.x, point.y, point.z], dtype=np.float64)
+
+
+def rotate_vector_by_quaternion(v, q):
+    q_vec = np.array([q.x, q.y, q.z], dtype=np.float64)
+    q_w = float(q.w)
+    uv = np.cross(q_vec, v)
+    uuv = np.cross(q_vec, uv)
+    return v + 2.0 * (q_w * uv + uuv)
+
+
+def transform_position(transform, position):
+    p = point_to_np(position)
+    t = transform.transform.translation
+    trans = np.array([t.x, t.y, t.z], dtype=np.float64)
+    return rotate_vector_by_quaternion(p, transform.transform.rotation) + trans
+
+
 class MicroGDGMPlannerService:
     def __init__(self):
         self.robot = RobotCommander()
@@ -64,6 +88,9 @@ class MicroGDGMPlannerService:
         self.service_name = rospy.get_param("~service_name", "/micro_g_dgm/get_motion_plan")
         self.object_topic = rospy.get_param("~object_topic", "/object/state")
         self.object_max_age_s = float(rospy.get_param("~object_max_age_s", 0.50))
+        self.base_odom_topic = rospy.get_param("~base_odom_topic", "/base/odom")
+        self.base_odom_max_age_s = float(rospy.get_param("~base_odom_max_age_s", 0.50))
+        self.tf_timeout = float(rospy.get_param("~tf_timeout", 0.20))
         self.service_wait_timeout = float(rospy.get_param("~service_wait_timeout", 30.0))
 
         self.T = float(rospy.get_param("~T", 2.0))
@@ -85,7 +112,13 @@ class MicroGDGMPlannerService:
 
         self.jmin, self.jmax = panda_joint_limits()
         self.last_odom = None
+        self.last_base_odom = None
+        self.tf_buffer = tf2_ros.Buffer()
+        self.tf_listener = tf2_ros.TransformListener(self.tf_buffer)
         rospy.Subscriber(self.object_topic, Odometry, self.cb_object, queue_size=1)
+        if self.base_odom_topic:
+            rospy.Subscriber(self.base_odom_topic, Odometry, self.cb_base_odom, queue_size=1)
+            rospy.loginfo("Micro-g DGM planner listening for base odometry on %s", self.base_odom_topic)
 
         model_path = Path(rospy.get_param(
             "~model_path",
@@ -125,6 +158,9 @@ class MicroGDGMPlannerService:
     def cb_object(self, msg):
         self.last_odom = msg
 
+    def cb_base_odom(self, msg):
+        self.last_base_odom = msg
+
     def latest_object_odom(self):
         if self.last_odom is None:
             return None
@@ -133,6 +169,59 @@ class MicroGDGMPlannerService:
         if 0.0 <= age <= self.object_max_age_s:
             return self.last_odom
         return None
+
+    def latest_base_position(self):
+        if self.last_base_odom is None:
+            return None
+        stamp = self.last_base_odom.header.stamp
+        msg_time = stamp if stamp != rospy.Time(0) else rospy.Time.now()
+        age = (rospy.Time.now() - msg_time).to_sec()
+        if age < 0.0 or age > self.base_odom_max_age_s:
+            rospy.logwarn_throttle(
+                2.0,
+                "Base odometry is stale or future-dated: age %.3f s; using internal base_position %s",
+                age,
+                self.base_position,
+            )
+            return None
+
+        source_frame = self.last_base_odom.header.frame_id or self.world_frame
+        if frame_id_equal(source_frame, self.world_frame):
+            return point_to_np(self.last_base_odom.pose.pose.position)
+
+        try:
+            transform = self.tf_buffer.lookup_transform(
+                self.world_frame,
+                source_frame,
+                stamp if stamp != rospy.Time(0) else rospy.Time(0),
+                rospy.Duration(self.tf_timeout),
+            )
+            return transform_position(transform, self.last_base_odom.pose.pose.position)
+        except Exception as exc:
+            rospy.logwarn_throttle(
+                2.0,
+                "Could not transform base odometry from %s to %s: %s; using internal base_position %s",
+                source_frame,
+                self.world_frame,
+                exc,
+                self.base_position,
+            )
+            return None
+
+    def current_base_position(self):
+        measured = self.latest_base_position()
+        if measured is None:
+            return self.base_position.copy()
+        if np.any(measured < self.base_min) or np.any(measured > self.base_max):
+            rospy.logwarn_throttle(
+                2.0,
+                "Measured base position %s is outside configured base box [%s, %s]",
+                measured,
+                self.base_min,
+                self.base_max,
+            )
+        self.base_position = measured.copy()
+        return self.base_position.copy()
 
     def extract_goal_position(self, mpr):
         pc = mpr.goal_constraints[0].position_constraints[0]
@@ -147,9 +236,9 @@ class MicroGDGMPlannerService:
         s_map = dict(zip(st.joint_state.name, st.joint_state.position))
         return np.array([s_map[j] for j in active_joints], dtype=np.float64)
 
-    def can_enter_reach_shell_within_horizon(self, object_odom):
+    def can_enter_reach_shell_within_horizon(self, object_odom, base_position):
         p_o, v_o, _ = object_state_from_odom(object_odom)
-        dist_now = target_reach_distance(self.base_position, p_o)
+        dist_now = target_reach_distance(base_position, p_o)
         range_change_budget = (float(np.linalg.norm(self.base_vel_limits)) + float(np.linalg.norm(v_o))) * self.T
         too_far = dist_now > self.reach_max + self.reach_margin + range_change_budget
         too_near = dist_now < self.reach_min - self.reach_margin - range_change_budget
@@ -180,8 +269,11 @@ class MicroGDGMPlannerService:
         if object_odom is None:
             object_odom = odom_from_goal(goal_pos, self.world_frame)
 
+        b0 = self.current_base_position()
+        rospy.loginfo("Micro-g DGM rollout using base position b0=%s in %s", b0, self.world_frame)
+
         if self.hard_reachability_checks:
-            reachable_by_horizon, dist_now, budget = self.can_enter_reach_shell_within_horizon(object_odom)
+            reachable_by_horizon, dist_now, budget = self.can_enter_reach_shell_within_horizon(object_odom, b0)
             if not reachable_by_horizon:
                 rospy.logwarn(
                     "Rejecting micro-g request: object/base distance %.3f m cannot enter reach shell [%.3f, %.3f] m within T=%.3f s; range-change budget %.3f m",
@@ -226,7 +318,7 @@ class MicroGDGMPlannerService:
             traj, _, b_hist, r_hist = rollout_micro_g_dgm_policy(
                 model=self.model,
                 q0=q0,
-                b0=self.base_position,
+                b0=b0,
                 object_odom=object_odom,
                 active_joints=active_joints,
                 group=group,
