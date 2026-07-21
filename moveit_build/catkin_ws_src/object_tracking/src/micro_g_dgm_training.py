@@ -49,6 +49,29 @@ def sample_box(n, lo, hi):
     hi = np.asarray(hi, dtype=np.float64)
     return np.random.uniform(lo, hi, (n, lo.shape[0])).astype(np.float64)
 
+
+def sample_outside_goal(n, lo, hi, goal_tol):
+    """Sample relative positions only from the HJB continuation region."""
+    rows = []
+    attempts = 0
+    max_attempts = max(100, n * 50)
+    while len(rows) < n and attempts < max_attempts:
+        candidates = sample_box(n - len(rows), lo, hi)
+        attempts += candidates.shape[0]
+        rows.extend(candidates[np.linalg.norm(candidates, axis=1) > goal_tol])
+    if len(rows) < n:
+        raise ValueError("Relative-position bounds do not contain enough points outside the goal set")
+    return np.asarray(rows[:n], dtype=np.float64)
+
+
+def sample_absorbing_goal(n, goal_tol):
+    """Sample the absorbing ball, with half the samples on its boundary."""
+    directions = np.random.normal(size=(n, 3))
+    directions /= np.maximum(np.linalg.norm(directions, axis=1, keepdims=True), 1e-12)
+    radii = goal_tol * np.cbrt(np.random.uniform(0.0, 1.0, (n, 1)))
+    radii[:n // 2] = goal_tol
+    return directions * radii
+
 def sample_const_velocities(n, lo, hi):
     lo = np.asarray(lo, dtype=np.float64)
     hi = np.asarray(hi, dtype=np.float64)
@@ -151,42 +174,45 @@ def make_training_batch(
         QreachT,
         reach_min,
         reach_max,
+        goal_tol,
+        timeout_failure_cost,
+        running_time_cost,
         fk_client,
         use_validity,
 ):
     q_np = sample_q_batch(validity_svc, active_joints, group_name, jmin, jmax, batch, use_validity)
     b_np = sample_box(batch, base_min, base_max)
-    r_np = sample_box(batch, rel_min, rel_max)
+    # The HJB residual is defined only in the continuation region ||r|| > TOL.
+    r_np = sample_outside_goal(batch, rel_min, rel_max, goal_tol)
     v_o_np = sample_const_velocities(batch, vo_min, vo_max) # sample constant object velocities, consistent with the t/tau progression in the rollout
     tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
-    tau_np = np.sort(tau_np.flatten().reshape((batch, 1)))[::-1]
     jac_np = jacobian_batch(group, q_np)
     p_ee_local_np = fk_position_batch(fk_client, active_joints, q_np)
 
-    running_cost_np = 0.5 * Qr * np.sum(r_np * r_np, axis=1)
-    running_cost_np += reachability_shell_cost(p_ee_local_np, r_np, reach_min, reach_max, Qreach)
-
     q_t_np = sample_q_batch(validity_svc, active_joints, group_name, jmin, jmax, bt, use_validity)
     b_t_np = sample_box(bt, base_min, base_max)
-    r_t_np = sample_box(bt, rel_min, rel_max)
-    # v_o_t_np = sample_box(bt, vo_min, vo_max)
+    # tau is remaining time, so horizon expiration is always tau == 0.
+    r_t_np = sample_outside_goal(bt, rel_min, rel_max, goal_tol)
     v_o_t_np = v_o_np[np.random.choice(v_o_np.shape[0], size=bt, replace=True), :] # sample from the training batch to ensure consistency with the sampled object velocities
-    tau_t_np = np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)
-    tau_t_np = np.sort(tau_t_np.flatten().reshape((bt, 1)))[::-1]
+    tau_t_np = np.zeros((bt, 1), dtype=np.float64)
     p_ee_local_t_np = fk_position_batch(fk_client, active_joints, q_t_np)
 
-    # Sample a few rows from the TC to add to the PDE batch, to help with training stability.
-    # This is a bit hacky but seems to help.
-    n_samples = 12
-    indices = np.random.permutation(bt)[:n_samples]
-    q_np[-n_samples:] = q_t_np[indices]
-    b_t_np[-n_samples:] = b_t_np[indices]
-    r_t_np[-n_samples:] = r_t_np[indices]
-    v_o_t_np[-n_samples:] = v_o_t_np[indices]
+    distance_to_goal_np = np.maximum(0.0, np.linalg.norm(r_np, axis=1) - goal_tol)
+    running_cost_np = 0.5 * Qr * distance_to_goal_np ** 2 + running_time_cost
+    running_cost_np += reachability_shell_cost(p_ee_local_np, r_np, reach_min, reach_max, Qreach)
 
-    phi_t_np = 0.5 * QrT * np.sum(r_t_np * r_t_np, axis=1)
+    timeout_distance_np = np.maximum(0.0, np.linalg.norm(r_t_np, axis=1) - goal_tol)
+    phi_t_np = 0.5 * QrT * timeout_distance_np ** 2 + timeout_failure_cost
     phi_t_np += 0.5 * Qv * np.sum(v_o_t_np * v_o_t_np, axis=1)
     phi_t_np += reachability_shell_cost(p_ee_local_t_np, r_t_np, reach_min, reach_max, QreachT)
+
+    # Absorption is a spatial boundary condition for every remaining time.
+    q_g_np = sample_q_batch(validity_svc, active_joints, group_name, jmin, jmax, bt, use_validity)
+    b_g_np = sample_box(bt, base_min, base_max)
+    r_g_np = sample_absorbing_goal(bt, goal_tol)
+    v_o_g_np = sample_const_velocities(bt, vo_min, vo_max)
+    tau_g_np = np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)
+    phi_g_np = np.zeros((bt,), dtype=np.float64)
 
     return make_batch(
         q_np=q_np,
@@ -202,6 +228,12 @@ def make_training_batch(
         v_o_t_np=v_o_t_np,
         tau_t_np=tau_t_np,
         phi_t_np=phi_t_np,
+        q_g_np=q_g_np,
+        b_g_np=b_g_np,
+        r_g_np=r_g_np,
+        v_o_g_np=v_o_g_np,
+        tau_g_np=tau_g_np,
+        phi_g_np=phi_g_np,
         r_q_diag_np=R_q_diag,
         r_b_diag_np=R_b_diag,
     )
@@ -232,13 +264,19 @@ def main():
     )
     pretrain_path = rospy.get_param("~pretrain_path", out_path)
 
-    Qr = float(rospy.get_param("~Qr", 10.0))
+    Qr = float(rospy.get_param("~Qr", 1e-2))
     QrT = float(rospy.get_param("~Qr_terminal", 100.0))
     Qv = float(rospy.get_param("~Qv_terminal", 0.0))
-    Qreach = float(rospy.get_param("~Qreach", 5.0))
+    Qreach = float(rospy.get_param("~Qreach", 1e-2))
     QreachT = float(rospy.get_param("~Qreach_terminal", 50.0))
-    Cpd = float(rospy.get_param("~Cpd", 1e3))
-    Ctr = float(rospy.get_param("~Ctr", 1e-2))
+    Cpd = float(rospy.get_param("~Cpd", 1e-2))
+    Ctr = float(rospy.get_param("~Ctr", 10.0))
+    Cgoal = float(rospy.get_param("~Cgoal", 10.0))
+    goal_tol = float(rospy.get_param("~goal_tol", 0.08))
+    timeout_failure_cost = float(rospy.get_param("~timeout_failure_cost", 0.0))
+    running_time_cost = float(rospy.get_param("~running_time_cost", 0.0))
+    if not 0.0 < goal_tol:
+        raise ValueError("~goal_tol must be positive")
 
     R_q_diag = np.array(rospy.get_param("~R_q_diag", [0.15] * 7), dtype=np.float64)
     R_b_diag = np.array(rospy.get_param("~R_b_diag", [0.50] * 3), dtype=np.float64)
@@ -285,12 +323,11 @@ def main():
     )
     os.makedirs(os.path.dirname(train_perf_path), exist_ok=True)
     with open(train_perf_path, "a") as f:
-        f.write("iter,loss_pde,loss_term,loss,elapsed_s\n")
+        f.write("iter,loss_pde,loss_timeout,loss_goal,loss,elapsed_s\n")
 
     t0 = time.time()
     last_loss = 0.0
     log_every = int(rospy.get_param("~log_every", 50))
-    iter_batch_size = (batch + bt)
     for it in range(1, iters + 1):
         train_batch = make_training_batch(
             group=group,
@@ -317,20 +354,28 @@ def main():
             QreachT=QreachT,
             reach_min=reach_min,
             reach_max=reach_max,
+            goal_tol=goal_tol,
+            timeout_failure_cost=timeout_failure_cost,
+            running_time_cost=running_time_cost,
             fk_client=fk_client,
             use_validity=use_validity,
         )
-        model, opt_state, loss, loss_pde, loss_term = train_step(model, opt_state, train_batch, lr, Cpd, Ctr)
+        model, opt_state, loss, loss_pde, loss_timeout, loss_goal = train_step(
+            model, opt_state, train_batch, lr, Cpd, Ctr, Cgoal
+        )
         last_loss = float(loss)
 
         if it % log_every == 0:
             elapsed = time.time() - t0
             rospy.loginfo(
-                "micro_g iter=%d pde=%.6f term=%.6f loss=%.6f elapsed=%.1fs",
-                it, float(loss_pde)/iter_batch_size, float(loss_term)/iter_batch_size, last_loss/iter_batch_size, elapsed,
+                "micro_g iter=%d pde=%.6f timeout=%.6f goal=%.6f loss=%.6f elapsed=%.1fs",
+                it, float(loss_pde), float(loss_timeout), float(loss_goal), last_loss, elapsed,
             )
             with open(train_perf_path, "a") as f:
-                f.write(f"{it},{float(loss_pde)},{float(loss_term)},{last_loss},{elapsed}\n")
+                f.write(
+                    f"{it},{float(loss_pde)},{float(loss_timeout)},"
+                    f"{float(loss_goal)},{last_loss},{elapsed}\n"
+                )
 
     meta = {
         "format": "micro_g_dgm_v1",
@@ -344,6 +389,9 @@ def main():
         "reach_max": reach_max,
         "Qreach": Qreach,
         "Qreach_terminal": QreachT,
+        "goal_tol": goal_tol,
+        "time_coordinate": "tau_is_remaining_time_terminal_at_zero",
+        "first_exit": True,
         "framework": "jax",
     }
     save_checkpoint(out_path, model, opt_state, meta=meta, loss=last_loss)

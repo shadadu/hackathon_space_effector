@@ -68,9 +68,12 @@ then `micro_g_dgm_intercept_planner.py`. Verify the endpoint with:
 
 # Perfomance Update
 
+# Zero drift and stationary robot base Case
 Sample DGM training loss performance plots are uploaded to the plots folder: https://github.com/shadadu/hackathon_space_effector/tree/main/plots
 
-Inference/rollout benchmark results to be shared soon. 
+Inference/rollout benchmark results to be shared soon.
+
+# Drifting object and movable robot base
 
 # Model
 

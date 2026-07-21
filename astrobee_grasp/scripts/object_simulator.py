@@ -40,8 +40,8 @@ class ObjectSimulator:
         self.z = float(rospy.get_param("~init_z", 0.25))
 
         # Constant velocity used only when drift=True.
-        self.vx = float(rospy.get_param("~vx", -0.02))
-        self.vy = float(rospy.get_param("~vy", 0.01))
+        self.vx = float(rospy.get_param("~vx", -0.002))
+        self.vy = float(rospy.get_param("~vy", 0.001))
         self.vz = float(rospy.get_param("~vz", 0.00))
 
         # Workspace box to keep object in reachable region

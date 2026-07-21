@@ -45,7 +45,7 @@ def policy_terms(dv_dq, dv_db, dv_dr, jac_ee, r_q_inv_diag, r_b_inv_diag):
     return u_q, u_b
 
 
-def terminal_loss(params: Params, batch: Dict[str, jnp.ndarray]):
+def timeout_loss(params: Params, batch: Dict[str, jnp.ndarray]):
     v_t = apply_mlp(
         params,
         build_input(
@@ -57,6 +57,21 @@ def terminal_loss(params: Params, batch: Dict[str, jnp.ndarray]):
         ),
     )
     return jnp.mean((v_t.reshape(-1) - batch["phi_t"].reshape(-1)) ** 2)
+
+
+def goal_loss(params: Params, batch: Dict[str, jnp.ndarray]):
+    """Dirichlet loss on the absorbing first-exit goal set."""
+    v_g = apply_mlp(
+        params,
+        build_input(
+            batch["q_g"],
+            batch["b_g"],
+            batch["r_g"],
+            batch["v_o_g"],
+            batch["tau_g"],
+        ),
+    )
+    return jnp.mean((v_g.reshape(-1) - batch["phi_g"].reshape(-1)) ** 2)
 
 
 def hjb_residual_loss(params: Params, batch: Dict[str, jnp.ndarray]):
@@ -97,10 +112,12 @@ def hjb_residual_loss(params: Params, batch: Dict[str, jnp.ndarray]):
     return jnp.mean(residual ** 2)
 
 
-def total_loss(params: Params, batch: Dict[str, jnp.ndarray], cpd: float, ctr: float):
+def total_loss(params: Params, batch: Dict[str, jnp.ndarray], cpd: float, ctr: float, cgoal: float):
     loss_pde = hjb_residual_loss(params, batch)
-    loss_term = terminal_loss(params, batch)
-    return cpd * loss_pde + ctr * loss_term, (loss_pde, loss_term)
+    loss_timeout = timeout_loss(params, batch)
+    loss_goal = goal_loss(params, batch)
+    loss = cpd * loss_pde + ctr * loss_timeout + cgoal * loss_goal
+    return loss, (loss_pde, loss_timeout, loss_goal)
 
 
 def adam_init(params: Params) -> AdamState:
@@ -137,10 +154,20 @@ def adam_update(params: Params, grads: Params, state: AdamState, lr: float, clip
 
 
 @jax.jit
-def train_step(params: Params, opt_state: AdamState, batch: Dict[str, jnp.ndarray], lr: float, cpd: float, ctr: float):
-    (loss, aux), grads = jax.value_and_grad(total_loss, has_aux=True)(params, batch, cpd, ctr)
+def train_step(
+        params: Params,
+        opt_state: AdamState,
+        batch: Dict[str, jnp.ndarray],
+        lr: float,
+        cpd: float,
+        ctr: float,
+        cgoal: float,
+):
+    (loss, aux), grads = jax.value_and_grad(total_loss, has_aux=True)(
+        params, batch, cpd, ctr, cgoal
+    )
     params, opt_state = adam_update(params, grads, opt_state, lr)
-    return params, opt_state, loss, aux[0], aux[1]
+    return params, opt_state, loss, aux[0], aux[1], aux[2]
 
 
 def make_batch(
@@ -157,6 +184,12 @@ def make_batch(
         v_o_t_np,
         tau_t_np,
         phi_t_np,
+        q_g_np,
+        b_g_np,
+        r_g_np,
+        v_o_g_np,
+        tau_g_np,
+        phi_g_np,
         r_q_diag_np,
         r_b_diag_np,
 ):
@@ -176,6 +209,12 @@ def make_batch(
         "v_o_t": jnp.asarray(v_o_t_np, dtype=jnp.float32),
         "tau_t": jnp.asarray(tau_t_np, dtype=jnp.float32),
         "phi_t": jnp.asarray(phi_t_np, dtype=jnp.float32),
+        "q_g": jnp.asarray(q_g_np, dtype=jnp.float32),
+        "b_g": jnp.asarray(b_g_np, dtype=jnp.float32),
+        "r_g": jnp.asarray(r_g_np, dtype=jnp.float32),
+        "v_o_g": jnp.asarray(v_o_g_np, dtype=jnp.float32),
+        "tau_g": jnp.asarray(tau_g_np, dtype=jnp.float32),
+        "phi_g": jnp.asarray(phi_g_np, dtype=jnp.float32),
         "r_q_diag": r_q_diag,
         "r_b_diag": r_b_diag,
         "r_q_inv_diag": 1.0 / jnp.maximum(r_q_diag, 1e-9),
