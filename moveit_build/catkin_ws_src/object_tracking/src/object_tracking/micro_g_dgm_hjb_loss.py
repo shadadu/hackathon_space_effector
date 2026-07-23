@@ -162,11 +162,12 @@ def train_step(
         cpd: float,
         ctr: float,
         cgoal: float,
+        clip_norm: float,
 ):
     (loss, aux), grads = jax.value_and_grad(total_loss, has_aux=True)(
         params, batch, cpd, ctr, cgoal
     )
-    params, opt_state = adam_update(params, grads, opt_state, lr)
+    params, opt_state = adam_update(params, grads, opt_state, lr, clip_norm)
     return params, opt_state, loss, aux[0], aux[1], aux[2]
 
 
