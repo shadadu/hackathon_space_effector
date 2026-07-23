@@ -254,6 +254,9 @@ def main():
     batch = int(rospy.get_param("~batch", 192))
     bt = int(rospy.get_param("~bt", max(64, batch // 3)))
     lr = float(rospy.get_param("~lr", 3e-4))
+    grad_clip_norm = float(rospy.get_param("~grad_clip_norm", 1.0))
+    if grad_clip_norm <= 0.0:
+        raise ValueError("~grad_clip_norm must be positive")
     hidden = int(rospy.get_param("~hidden", 192))
     depth = int(rospy.get_param("~depth", 24))
     seed = int(rospy.get_param("~seed", 0))
@@ -264,15 +267,15 @@ def main():
     )
     pretrain_path = rospy.get_param("~pretrain_path", out_path)
 
-    Qr = float(rospy.get_param("~Qr", 1e-2))
+    Qr = float(rospy.get_param("~Qr", 1.0))
     QrT = float(rospy.get_param("~Qr_terminal", 100.0))
     Qv = float(rospy.get_param("~Qv_terminal", 0.0))
     Qreach = float(rospy.get_param("~Qreach", 1e-2))
     QreachT = float(rospy.get_param("~Qreach_terminal", 50.0))
-    Cpd = float(rospy.get_param("~Cpd", 1e-2))
-    Ctr = float(rospy.get_param("~Ctr", 10.0))
+    Cpd = float(rospy.get_param("~Cpd", 100.0))
+    Ctr = float(rospy.get_param("~Ctr", 1e1))
     Cgoal = float(rospy.get_param("~Cgoal", 10.0))
-    goal_tol = float(rospy.get_param("~goal_tol", 0.08))
+    goal_tol = float(rospy.get_param("~goal_tol", 1e-1))
     timeout_failure_cost = float(rospy.get_param("~timeout_failure_cost", 0.0))
     running_time_cost = float(rospy.get_param("~running_time_cost", 0.0))
     if not 0.0 < goal_tol:
@@ -321,6 +324,26 @@ def main():
         "~train_perf_path",
         "/root/catkin_ws/src/object_tracking/models/micro_g_train_perf_data.csv",
     )
+
+    meta = {
+        "format": "micro_g_dgm_v1",
+        "in_dim": 17,
+        "hidden": hidden,
+        "depth": depth,
+        "T": T,
+        "state": "q,b,r,v_o,tau",
+        "controls": "joint_velocity,base_velocity",
+        "reach_min": reach_min,
+        "reach_max": reach_max,
+        "Qreach": Qreach,
+        "Qreach_terminal": QreachT,
+        "goal_tol": goal_tol,
+        "time_coordinate": "tau_is_remaining_time_terminal_at_zero",
+        "first_exit": True,
+        "grad_clip_norm": grad_clip_norm,
+        "framework": "jax",
+    }
+
     os.makedirs(os.path.dirname(train_perf_path), exist_ok=True)
     with open(train_perf_path, "a") as f:
         f.write("iter,loss_pde,loss_timeout,loss_goal,loss,elapsed_s\n")
@@ -361,12 +384,13 @@ def main():
             use_validity=use_validity,
         )
         model, opt_state, loss, loss_pde, loss_timeout, loss_goal = train_step(
-            model, opt_state, train_batch, lr, Cpd, Ctr, Cgoal
+            model, opt_state, train_batch, lr, Cpd, Ctr, Cgoal, grad_clip_norm
         )
         last_loss = float(loss)
 
         if it % log_every == 0:
             elapsed = time.time() - t0
+            save_checkpoint(out_path, model, opt_state, meta=meta, loss=last_loss)
             rospy.loginfo(
                 "micro_g iter=%d pde=%.6f timeout=%.6f goal=%.6f loss=%.6f elapsed=%.1fs",
                 it, float(loss_pde), float(loss_timeout), float(loss_goal), last_loss, elapsed,
@@ -377,23 +401,6 @@ def main():
                     f"{float(loss_goal)},{last_loss},{elapsed}\n"
                 )
 
-    meta = {
-        "format": "micro_g_dgm_v1",
-        "in_dim": 17,
-        "hidden": hidden,
-        "depth": depth,
-        "T": T,
-        "state": "q,b,r,v_o,tau",
-        "controls": "joint_velocity,base_velocity",
-        "reach_min": reach_min,
-        "reach_max": reach_max,
-        "Qreach": Qreach,
-        "Qreach_terminal": QreachT,
-        "goal_tol": goal_tol,
-        "time_coordinate": "tau_is_remaining_time_terminal_at_zero",
-        "first_exit": True,
-        "framework": "jax",
-    }
     save_checkpoint(out_path, model, opt_state, meta=meta, loss=last_loss)
     rospy.loginfo("Saved micro-g DGM checkpoint: %s", out_path)
 
