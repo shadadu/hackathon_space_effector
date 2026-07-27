@@ -72,6 +72,20 @@ def sample_absorbing_goal(n, goal_tol):
     radii[:n // 2] = goal_tol
     return directions * radii
 
+
+def sample_controlled_entry_pde(n, lo, hi, goal_tol, guard_width):
+    """Mix global PDE points with points inside and around the entry guard."""
+    samples = sample_box(n, lo, hi)
+    near_count = max(1, n // 3)
+    directions = np.random.normal(size=(near_count, 3))
+    directions /= np.maximum(np.linalg.norm(directions, axis=1, keepdims=True), 1e-12)
+    radii = (goal_tol + guard_width) * np.cbrt(
+        np.random.uniform(0.0, 1.0, (near_count, 1))
+    )
+    near_samples = directions * radii
+    samples[:near_count] = np.minimum(np.maximum(near_samples, lo), hi)
+    return samples
+
 def sample_const_velocities(n, lo, hi):
     lo = np.asarray(lo, dtype=np.float64)
     hi = np.asarray(hi, dtype=np.float64)
@@ -175,6 +189,9 @@ def make_training_batch(
         reach_min,
         reach_max,
         goal_tol,
+        goal_vel_tol,
+        entry_guard_width,
+        entry_velocity_weight,
         timeout_failure_cost,
         running_time_cost,
         fk_client,
@@ -182,8 +199,11 @@ def make_training_batch(
 ):
     q_np = sample_q_batch(validity_svc, active_joints, group_name, jmin, jmax, batch, use_validity)
     b_np = sample_box(batch, base_min, base_max)
-    # The HJB residual is defined only in the continuation region ||r|| > TOL.
-    r_np = sample_outside_goal(batch, rel_min, rel_max, goal_tol)
+    # Include near/inside-position points; the loss masks only states whose
+    # derived policy meets both position and relative-velocity entry tests.
+    r_np = sample_controlled_entry_pde(
+        batch, rel_min, rel_max, goal_tol, entry_guard_width
+    )
     v_o_np = sample_const_velocities(batch, vo_min, vo_max) # sample constant object velocities, consistent with the t/tau progression in the rollout
     tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
     jac_np = jacobian_batch(group, q_np)
@@ -213,6 +233,7 @@ def make_training_batch(
     v_o_g_np = sample_const_velocities(bt, vo_min, vo_max)
     tau_g_np = np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)
     phi_g_np = np.zeros((bt,), dtype=np.float64)
+    jac_g_np = jacobian_batch(group, q_g_np)
 
     return make_batch(
         q_np=q_np,
@@ -234,6 +255,11 @@ def make_training_batch(
         v_o_g_np=v_o_g_np,
         tau_g_np=tau_g_np,
         phi_g_np=phi_g_np,
+        jac_ee_g_np=jac_g_np,
+        goal_pos_tol=goal_tol,
+        goal_vel_tol=goal_vel_tol,
+        entry_guard_width=entry_guard_width,
+        entry_velocity_weight=entry_velocity_weight,
         r_q_diag_np=R_q_diag,
         r_b_diag_np=R_b_diag,
     )
@@ -257,8 +283,8 @@ def main():
     grad_clip_norm = float(rospy.get_param("~grad_clip_norm", 1.0))
     if grad_clip_norm <= 0.0:
         raise ValueError("~grad_clip_norm must be positive")
-    hidden = int(rospy.get_param("~hidden", 192))
-    depth = int(rospy.get_param("~depth", 24))
+    hidden = int(rospy.get_param("~hidden", 220))
+    depth = int(rospy.get_param("~depth", 28))
     seed = int(rospy.get_param("~seed", 0))
     load_model = as_bool(rospy.get_param("~load_model", False))
     out_path = rospy.get_param(
@@ -267,19 +293,32 @@ def main():
     )
     pretrain_path = rospy.get_param("~pretrain_path", out_path)
 
-    Qr = float(rospy.get_param("~Qr", 1.0))
+    Qr = float(rospy.get_param("~Qr", 1e1))
     QrT = float(rospy.get_param("~Qr_terminal", 100.0))
     Qv = float(rospy.get_param("~Qv_terminal", 0.0))
     Qreach = float(rospy.get_param("~Qreach", 1e-2))
     QreachT = float(rospy.get_param("~Qreach_terminal", 50.0))
-    Cpd = float(rospy.get_param("~Cpd", 100.0))
-    Ctr = float(rospy.get_param("~Ctr", 1e1))
-    Cgoal = float(rospy.get_param("~Cgoal", 10.0))
+
+    Cpd = float(rospy.get_param("~Cpd", 1e5))
+    Ctr = float(rospy.get_param("~Ctr", 1e-2))
+    Cgoal = float(rospy.get_param("~Cgoal", 1e3))
+
     goal_tol = float(rospy.get_param("~goal_tol", 1e-1))
+    goal_vel_tol = float(
+        rospy.get_param("~goal_vel_tol", rospy.get_param("~grasp_vel_tol", 0.5))
+    )
+    entry_guard_width = float(rospy.get_param("~entry_guard_width", 0.10))
+    entry_velocity_weight = float(rospy.get_param("~entry_velocity_weight", 10.0))
     timeout_failure_cost = float(rospy.get_param("~timeout_failure_cost", 0.0))
     running_time_cost = float(rospy.get_param("~running_time_cost", 0.0))
     if not 0.0 < goal_tol:
         raise ValueError("~goal_tol must be positive")
+    if not 0.0 < goal_vel_tol:
+        raise ValueError("~goal_vel_tol must be positive")
+    if not 0.0 < entry_guard_width:
+        raise ValueError("~entry_guard_width must be positive")
+    if entry_velocity_weight < 0.0:
+        raise ValueError("~entry_velocity_weight must be non-negative")
 
     R_q_diag = np.array(rospy.get_param("~R_q_diag", [0.15] * 7), dtype=np.float64)
     R_b_diag = np.array(rospy.get_param("~R_b_diag", [0.50] * 3), dtype=np.float64)
@@ -338,6 +377,10 @@ def main():
         "Qreach": Qreach,
         "Qreach_terminal": QreachT,
         "goal_tol": goal_tol,
+        "goal_vel_tol": goal_vel_tol,
+        "entry_guard_width": entry_guard_width,
+        "entry_velocity_weight": entry_velocity_weight,
+        "entry_condition": "position_and_derived_relative_velocity",
         "time_coordinate": "tau_is_remaining_time_terminal_at_zero",
         "first_exit": True,
         "grad_clip_norm": grad_clip_norm,
@@ -378,6 +421,9 @@ def main():
             reach_min=reach_min,
             reach_max=reach_max,
             goal_tol=goal_tol,
+            goal_vel_tol=goal_vel_tol,
+            entry_guard_width=entry_guard_width,
+            entry_velocity_weight=entry_velocity_weight,
             timeout_failure_cost=timeout_failure_cost,
             running_time_cost=running_time_cost,
             fk_client=fk_client,

@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 from dataclasses import dataclass
+from threading import Lock
 from typing import Any, Callable, List, Optional, Tuple
 
 import numpy as np
@@ -26,11 +27,47 @@ class MicroGRolloutConfig:
     base_max: np.ndarray = None
     grasp_pos_tol: float = 0.08
     grasp_vel_tol: float = 0.05
+    entry_guard_width: float = 0.10
+    entry_velocity_weight: float = 10.0
     reach_min: float = 0.20
     reach_max: float = 0.75
     reach_margin: float = 0.02
     require_final_reachable: bool = True
     max_nan_guard: int = 5
+
+
+_ENTRY_STATS = {
+    "rollouts": 0,
+    "position_only": 0,
+    "grasp_ready": 0,
+    "no_position_entry": 0,
+}
+_ENTRY_STATS_LOCK = Lock()
+
+
+def record_entry_outcome(outcome: str):
+    with _ENTRY_STATS_LOCK:
+        _ENTRY_STATS["rollouts"] += 1
+        _ENTRY_STATS[outcome] += 1
+        total = _ENTRY_STATS["rollouts"]
+        position_total = _ENTRY_STATS["position_only"] + _ENTRY_STATS["grasp_ready"]
+        position_only_rate = _ENTRY_STATS["position_only"] / float(total)
+        grasp_ready_rate = _ENTRY_STATS["grasp_ready"] / float(total)
+        conditional_ready_rate = (
+            _ENTRY_STATS["grasp_ready"] / float(position_total) if position_total else 0.0
+        )
+        snapshot = dict(_ENTRY_STATS)
+    rospy.loginfo(
+        "micro-g entry outcomes: total=%d position_only=%d (%.1f%%) "
+        "grasp_ready=%d (%.1f%%) no_position=%d ready_given_position=%.1f%%",
+        total,
+        snapshot["position_only"],
+        100.0 * position_only_rate,
+        snapshot["grasp_ready"],
+        100.0 * grasp_ready_rate,
+        snapshot["no_position_entry"],
+        100.0 * conditional_ready_rate,
+    )
 
 
 def clamp(x, lo, hi):
@@ -145,6 +182,9 @@ def rollout_micro_g_dgm_policy(
     last_valid_len = 0
     min_reach_dist = None
     nan_hits = 0
+    saw_position_goal = False
+    last_u_q = None
+    last_u_b = None
 
     for k in range(N):
         t_s = min(k * cfg.dt, cfg.T)
@@ -182,23 +222,28 @@ def rollout_micro_g_dgm_policy(
         b_hist[k, :] = b
         r_hist[k, :] = r
 
-        # Position-only first exit, matching the absorbing training set.
-        if np.linalg.norm(r) <= cfg.grasp_pos_tol:
-            pt = JointTrajectoryPoint()
-            pt.positions = [float(x) for x in q.tolist()]
-            pt.velocities = [0.0] * 7
-            pt.time_from_start = rospy.Duration.from_sec(t_s)
-            traj.joint_trajectory.points.append(pt)
-            return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
-
-        # At tau=0 the timeout boundary applies; do not evaluate another control.
+        # At tau=0, use the last applied command to check entry before timeout.
         if tau <= 0.0:
+            if last_u_q is not None:
+                terminal_v_rel = jac.dot(last_u_q) + last_u_b - v_o
+                position_ready = np.linalg.norm(r) <= cfg.grasp_pos_tol
+                velocity_ready = np.linalg.norm(terminal_v_rel) <= cfg.grasp_vel_tol
+                saw_position_goal = saw_position_goal or position_ready
+                if position_ready and velocity_ready:
+                    pt = JointTrajectoryPoint()
+                    pt.positions = [float(x) for x in q.tolist()]
+                    pt.velocities = [float(x) for x in last_u_q.tolist()]
+                    pt.time_from_start = rospy.Duration.from_sec(t_s)
+                    traj.joint_trajectory.points.append(pt)
+                    record_entry_outcome("grasp_ready")
+                    return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
             last_valid_len = k + 1
             break
 
         u_q, u_b = policy_np(
             model, q, b, r, v_o, np.array([tau], dtype=np.float64),
             jac, cfg.R_q_diag, cfg.R_b_diag,
+            cfg.grasp_pos_tol, cfg.entry_guard_width, cfg.entry_velocity_weight,
         )
         u_q = np.asarray(u_q, dtype=np.float64).reshape(7)
         u_b = np.asarray(u_b, dtype=np.float64).reshape(3)
@@ -213,12 +258,30 @@ def rollout_micro_g_dgm_policy(
         rospy.loginfo("Rollout step %d: u_q=%s, u_b=%s", k, u_q, u_b)
         u_q = clamp(u_q, -cfg.joint_vel_limits, cfg.joint_vel_limits)
         u_b = clamp(u_b, -cfg.base_vel_limits, cfg.base_vel_limits)
+        last_u_q = u_q.copy()
+        last_u_b = u_b.copy()
+
+        v_rel = jac.dot(u_q) + u_b - v_o
+        position_ready = np.linalg.norm(r) <= cfg.grasp_pos_tol
+        velocity_ready = np.linalg.norm(v_rel) <= cfg.grasp_vel_tol
+        saw_position_goal = saw_position_goal or position_ready
 
         pt = JointTrajectoryPoint()
         pt.positions = [float(x) for x in q.tolist()]
         pt.velocities = [float(x) for x in u_q.tolist()]
         pt.time_from_start = rospy.Duration.from_sec(t_s)
         traj.joint_trajectory.points.append(pt)
+
+        if position_ready and velocity_ready:
+            record_entry_outcome("grasp_ready")
+            return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
+        if position_ready:
+            rospy.logwarn_throttle(
+                1.0,
+                "Position tolerance reached but relative speed %.4f exceeds %.4f m/s; continuing rollout",
+                np.linalg.norm(v_rel),
+                cfg.grasp_vel_tol,
+            )
 
         if k < N - 1:
             q = q + cfg.dt * u_q
@@ -239,6 +302,7 @@ def rollout_micro_g_dgm_policy(
         q_hist = q_hist[:last_valid_len]
         b_hist = b_hist[:last_valid_len]
         r_hist = r_hist[:last_valid_len]
+    record_entry_outcome("position_only" if saw_position_goal else "no_position_entry")
     if cfg.require_final_reachable and last_reach_dist is not None and not is_target_reachable(
             last_reach_dist,
             cfg.reach_min,

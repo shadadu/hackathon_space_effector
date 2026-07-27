@@ -12,6 +12,10 @@
   <arg name="tf_timeout" default="0.20"/>
   <arg name="T" default="2.0"/>
   <arg name="dt" default="0.02"/>
+  <arg name="goal_tol" default="0.10"/>
+  <arg name="goal_vel_tol" default="0.05"/>
+  <arg name="entry_guard_width" default="0.10"/>
+  <arg name="entry_velocity_weight" default="10.0"/>
   <arg name="reach_min" default="0.20"/>
   <arg name="reach_max" default="0.75"/>
   <arg name="reach_margin" default="0.02"/>
@@ -35,6 +39,10 @@
     <param name="model_path" value="$(arg model_path)"/>
     <param name="T" value="$(arg T)"/>
     <param name="dt" value="$(arg dt)"/>
+    <param name="goal_tol" value="$(arg goal_tol)"/>
+    <param name="grasp_vel_tol" value="$(arg goal_vel_tol)"/>
+    <param name="entry_guard_width" value="$(arg entry_guard_width)"/>
+    <param name="entry_velocity_weight" value="$(arg entry_velocity_weight)"/>
     <param name="reach_min" value="$(arg reach_min)"/>
     <param name="reach_max" value="$(arg reach_max)"/>
     <param name="reach_margin" value="$(arg reach_margin)"/>
