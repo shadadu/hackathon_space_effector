@@ -1,10 +1,10 @@
 <launch>
   <arg name="object_drift" default="true"/>
-  <arg name="object_vx" default="-0.02"/>
-  <arg name="object_vy" default="0.01"/>
+  <arg name="object_vx" default="-0.0002"/>
+  <arg name="object_vy" default="0.0001"/>
   <arg name="object_vz" default="0.00"/>
   <arg name="object_bounce" default="false"/>
-  <arg name="object_clamp_to_bounds" default="false"/>
+  <arg name="object_clamp_to_bounds" default="true"/>
   <arg name="object_x" default="0.50"/>
   <arg name="object_y" default="0.00"/>
   <arg name="object_z" default="0.25"/>
