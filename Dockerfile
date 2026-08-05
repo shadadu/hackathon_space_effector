@@ -6,6 +6,16 @@ ARG ROS_PLATFORM=linux/amd64
 FROM --platform=${ROS_PLATFORM} ros:noetic-ros-core
 #FROM --platform=linux/amd64 ros:noetic-desktop-full
 
+# Match the frozen ROS Noetic repository with an immutable Ubuntu snapshot.
+# Plain-HTTP requests to the base image's archive mirrors can be silently
+# dropped, leaving apt with only the ROS index and causing misleading "not
+# installable" errors for Ubuntu packages such as Qt, Ogre, Assimp, and Gazebo.
+ARG UBUNTU_SNAPSHOT=20250609T000000Z
+RUN sed -i \
+    -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|g" \
+    -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|g" \
+    /etc/apt/sources.list
+
 # Install basic tools and Python packages
 RUN apt-get update && apt-get install -y \
     python3-pip \
