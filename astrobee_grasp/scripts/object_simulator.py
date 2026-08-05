@@ -30,9 +30,9 @@ class ObjectSimulator:
         self.rate_hz = float(rospy.get_param("~rate_hz", 20.0))
 
         # Motion mode. For HJB/DGM constant-drift tests, use drift=True and bounce=False.
-        self.drift = as_bool(rospy.get_param("~drift", False))
+        self.drift = as_bool(rospy.get_param("~drift", True))
         self.bounce = as_bool(rospy.get_param("~bounce", False))
-        self.clamp_to_bounds = as_bool(rospy.get_param("~clamp_to_bounds", False))
+        self.clamp_to_bounds = as_bool(rospy.get_param("~clamp_to_bounds", True))
 
         # Safe default pose for Panda reach testing
         self.x = float(rospy.get_param("~init_x", 0.50))
