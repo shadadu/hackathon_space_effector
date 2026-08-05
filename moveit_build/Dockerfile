@@ -3,10 +3,20 @@ ARG JAX_VARIANT=cpu
 FROM --platform=${ROS_PLATFORM} ros:noetic
 
 ARG JAX_VARIANT=cpu
+ARG UBUNTU_SNAPSHOT=20250609T000000Z
 
 ENV DEBIAN_FRONTEND=noninteractive
 
-RUN apt-get update && apt-get install -y \
+# Match the frozen ROS Noetic repository with an immutable Ubuntu snapshot.
+# Plain-HTTP requests to the base image's archive mirrors can be silently
+# dropped, leaving apt with only the ROS index and causing misleading
+# "not installable" errors for Ubuntu packages.
+RUN sed -i \
+    -e "s|http://archive.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|g" \
+    -e "s|http://security.ubuntu.com/ubuntu/|https://snapshot.ubuntu.com/ubuntu/${UBUNTU_SNAPSHOT}/|g" \
+    /etc/apt/sources.list
+
+RUN apt-get update --fix-missing && apt-get install -y \
     build-essential \
     python3-catkin-tools \
     python3-pip \
