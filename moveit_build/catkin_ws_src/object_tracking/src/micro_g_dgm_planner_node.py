@@ -305,9 +305,9 @@ class MicroGDGMPlannerService:
             base_min=self.base_min,
             base_max=self.base_max,
             grasp_pos_tol=float(
-                rospy.get_param("~goal_tol", rospy.get_param("~grasp_pos_tol", 0.08))
+                rospy.get_param("~goal_tol", rospy.get_param("~grasp_pos_tol", 0.8))
             ),
-            grasp_vel_tol=float(rospy.get_param("~grasp_vel_tol", 0.05)),
+            grasp_vel_tol=float(rospy.get_param("~grasp_vel_tol", 0.8)),
             entry_guard_width=float(rospy.get_param("~entry_guard_width", 0.10)),
             entry_velocity_weight=float(rospy.get_param("~entry_velocity_weight", 10.0)),
             reach_min=self.reach_min,
