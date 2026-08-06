@@ -19,7 +19,7 @@ class ObjectPlanningSceneUpdater:
         self.size_z = rospy.get_param("~size_z", 0.12)
 
         # If we haven't received state yet, keep object far away to avoid collisions
-        self.spawn_far_x = rospy.get_param("~spawn_far_x", 5.0)
+        self.spawn_far_x = rospy.get_param("~spawn_far_x", 1.0)
 
         # Public, stable topic used by MoveIt to receive collision objects
         self.pub_co = rospy.Publisher("/collision_object", CollisionObject, queue_size=10)
