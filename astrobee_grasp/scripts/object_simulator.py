@@ -1,8 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python3import rospy
+import numpy as np
 import rospy
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Quaternion
 from tf.transformations import quaternion_from_euler
+from geometry_msgs.msg import Point, Vector3
 
 
 def clamp(x, lo, hi):
@@ -35,9 +37,13 @@ class ObjectSimulator:
         self.clamp_to_bounds = as_bool(rospy.get_param("~clamp_to_bounds", True))
 
         # Safe default pose for Panda reach testing
-        self.x = float(rospy.get_param("~init_x", 0.50))
-        self.y = float(rospy.get_param("~init_y", 0.00))
-        self.z = float(rospy.get_param("~init_z", 0.25))
+        self.init_x = float(rospy.get_param("~init_x", 0.50))
+        self.init_y = float(rospy.get_param("~init_y", 0.00))
+        self.init_z = float(rospy.get_param("~init_z", 0.25))
+
+        self.x = self.init_x
+        self.y = self.init_y
+        self.z = self.init_z
 
         # Constant velocity used only when drift=True.
         self.vx = float(rospy.get_param("~vx", -0.002))
@@ -45,12 +51,19 @@ class ObjectSimulator:
         self.vz = float(rospy.get_param("~vz", 0.00))
 
         # Workspace box to keep object in reachable region
-        self.x_min = float(rospy.get_param("~x_min", 0.35))
-        self.x_max = float(rospy.get_param("~x_max", 0.65))
-        self.y_min = float(rospy.get_param("~y_min", -0.20))
-        self.y_max = float(rospy.get_param("~y_max", 0.20))
-        self.z_min = float(rospy.get_param("~z_min", 0.10))
-        self.z_max = float(rospy.get_param("~z_max", 0.40))
+        self.x_min = float(rospy.get_param("~x_min", -1.0))
+        self.x_max = float(rospy.get_param("~x_max", 5.0))
+        self.y_min = float(rospy.get_param("~y_min", -1.0))
+        self.y_max = float(rospy.get_param("~y_max", 2.0))
+        self.z_min = float(rospy.get_param("~z_min", -1.0))
+        self.z_max = float(rospy.get_param("~z_max", 1.0))
+        
+        # self.x_min = float(rospy.get_param("~x_min", 0.35))
+        # self.x_max = float(rospy.get_param("~x_max", 0.65))
+        # self.y_min = float(rospy.get_param("~y_min", -0.20))
+        # self.y_max = float(rospy.get_param("~y_max", 0.20))
+        # self.z_min = float(rospy.get_param("~z_min", 0.10))
+        # self.z_max = float(rospy.get_param("~z_max", 0.40))
 
         # Fixed orientation by default
         self.roll = float(rospy.get_param("~roll", 0.0))
@@ -105,6 +118,27 @@ class ObjectSimulator:
             self.y = clamp(self.y, self.y_min, self.y_max)
             self.z = clamp(self.z, self.z_min, self.z_max)
 
+    def opt_reset_position(self):
+        clamped_x = False
+        clamped_y = False
+        clamped_z = False
+        clamped = False
+        odom = self.make_msg()
+        if odom.pose.pose.position.x >= self.x_max or odom.pose.pose.position.x <= self.x_min:
+            clamped_x = True
+        if odom.pose.pose.position.y >= self.y_max or odom.pose.pose.position.y <= self.y_min:
+            clamped_y = True
+        if odom.pose.pose.position.z >= self.z_max or odom.pose.pose.position.z <= self.z_min:
+            clamped_z = True
+
+        clamped = clamped_x or clamped_y or clamped_z
+        if clamped:
+            rospy.logwarn("ObjectSimulator: Object position clamped to workspace bounds")
+            self.x = self.init_x
+            self.y = self.init_y
+            self.z = self.init_z
+        self.last_t = rospy.Time.now()
+
     def make_msg(self):
         odom = Odometry()
         odom.header.stamp = rospy.Time.now()
@@ -156,6 +190,7 @@ class ObjectSimulator:
                 dt = 0.0
 
             self.step(dt)
+            self.opt_reset_position()
             self.pub.publish(self.make_msg())
             rate.sleep()
 
