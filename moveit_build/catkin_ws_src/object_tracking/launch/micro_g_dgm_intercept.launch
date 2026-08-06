@@ -12,8 +12,8 @@
   <arg name="tf_timeout" default="0.20"/>
   <arg name="T" default="2.0"/>
   <arg name="dt" default="0.02"/>
-  <arg name="goal_tol" default="0.10"/>
-  <arg name="goal_vel_tol" default="0.05"/>
+  <arg name="goal_tol" default="0.50"/>
+  <arg name="goal_vel_tol" default="0.20"/>
   <arg name="entry_guard_width" default="0.10"/>
   <arg name="entry_velocity_weight" default="10.0"/>
   <arg name="reach_min" default="0.20"/>
