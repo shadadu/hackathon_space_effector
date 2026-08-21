@@ -213,20 +213,20 @@ def rollout_micro_g_dgm_policy(
         if latest_odom is not object_odom:
             object_odom = latest_odom
             p_o, v_o, stamp = object_state_from_odom(object_odom)
-            rospy.loginfo("Odometry object state at stamp=%s: p_o=%s, v_o=%s", stamp, p_o, v_o)
         else:
             msg_age = (rospy.Time.now() - stamp).to_sec()
             o_dt = msg_age
             p_o, v_o = predict_object_state(object_odom, msg_age + t_s)
-            rospy.loginfo("Predicted object state at t=%s: p_o=%s, v_o=%s", msg_age + t_s, p_o, v_o)
 
         # rospy.loginfo("Rollout step %d/%d: t=%s, tau=%s", k, N, t_s, tau)
 
         if fk_client is None:
             pose = group.get_current_pose().pose
             p_ee_local = point_to_np(pose.position)
+            rospy.loginfo("Rollout step %d/%d: FK from group: p_ee_local=%s", k, N, p_ee_local)
         else:
             p_ee_local = fk_client.ee_position(active_joints, q)
+            rospy.loginfo("Rollout step %d/%d: FK from client: p_ee_local=%s", k, N, p_ee_local)
         p_ee = b + p_ee_local
         r = p_ee - p_o
 
@@ -276,32 +276,32 @@ def rollout_micro_g_dgm_policy(
         last_u_q = u_q.copy()
         last_u_b = u_b.copy()
 
-        # v_rel = jac.dot(u_q) + u_b - v_o
-        # position_ready = np.linalg.norm(r) <= cfg.grasp_pos_tol
-        # velocity_ready = np.linalg.norm(v_rel) <= cfg.grasp_vel_tol
-        # saw_position_goal = saw_position_goal or position_ready
-        # rospy.loginfo(
-        #     "Rollout step %d: p_o=%s, b=%s, p_ee=%s, r=%s, v_rel=%s, position_ready=%s, velocity_ready=%s",
-        #     k, p_o, b, p_ee, r, v_rel, position_ready, velocity_ready
-        # )
+        v_rel = jac.dot(u_q) + u_b - v_o
+        position_ready = np.linalg.norm(r) <= cfg.grasp_pos_tol
+        velocity_ready = np.linalg.norm(v_rel) <= cfg.grasp_vel_tol
+        saw_position_goal = saw_position_goal or position_ready
+        rospy.loginfo(
+            "Rollout step %d: p_o=%s, b=%s, p_ee=%s, r=%s, v_rel=%s, position_ready=%s, velocity_ready=%s",
+            k, p_o, b, p_ee, r, v_rel, position_ready, velocity_ready
+        )
 
-        # pt = JointTrajectoryPoint()
-        # pt.positions = [float(x) for x in q.tolist()]
-        # pt.velocities = [float(x) for x in u_q.tolist()]
-        # pt.time_from_start = rospy.Duration.from_sec(t_s)
-        # traj.joint_trajectory.points.append(pt)
+        pt = JointTrajectoryPoint()
+        pt.positions = [float(x) for x in q.tolist()]
+        pt.velocities = [float(x) for x in u_q.tolist()]
+        pt.time_from_start = rospy.Duration.from_sec(t_s)
+        traj.joint_trajectory.points.append(pt)
 
-        # if position_ready and velocity_ready:
-        #     record_entry_outcome("grasp_ready")
-        #     rospy.loginfo("Rollout step %d: position and velocity ready; returning early", k)
-        #     return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
-        # if position_ready:
-        #     rospy.logwarn_throttle(
-        #         1.0,
-        #         "Position tolerance reached but relative speed %.4f exceeds %.4f m/s; continuing rollout",
-        #         np.linalg.norm(v_rel),
-        #         cfg.grasp_vel_tol,
-        #     )
+        if position_ready and velocity_ready:
+            record_entry_outcome("grasp_ready")
+            rospy.loginfo("Rollout step %d: position and velocity ready; returning early", k)
+            return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
+        if position_ready:
+            rospy.logwarn_throttle(
+                1.0,
+                "Position tolerance reached but relative speed %.4f exceeds %.4f m/s; continuing rollout",
+                np.linalg.norm(v_rel),
+                cfg.grasp_vel_tol,
+            )
 
         if k < N - 1:
             q = q + cfg.dt * u_q
@@ -318,45 +318,41 @@ def rollout_micro_g_dgm_policy(
                 p_ee_local = fk_client.ee_position(active_joints, q)
             p_ee = b + p_ee_local
             r = p_ee - p_o
-            ee_o_dist = np.linalg.norm(np.asarray(r))
+            ee_o_dist = np.linalg.norm(r)
             object_base_dist = target_reach_distance(b, p_o)
             last_ee_dist = ee_o_dist
             if min_ee_dist is None or ee_o_dist < min_ee_dist:
                 min_ee_dist = ee_o_dist
 
-            pt = JointTrajectoryPoint()
-            pt.positions = [float(x) for x in q.tolist()]
-            pt.velocities = [float(x) for x in u_q.tolist()]
-            pt.time_from_start = rospy.Duration.from_sec(t_s)
-            traj.joint_trajectory.points.append(pt)
+            # v_rel = jac.dot(u_q) + u_b - v_o
+            # position_ready = np.linalg.norm(r) <= cfg.grasp_pos_tol
+            # velocity_ready = np.linalg.norm(v_rel) <= cfg.grasp_vel_tol
+            # rospy.loginfo("Rollout step %d: r_norm=%.4f, v_rel_norm=%.4f, position_ready=%s, velocity_ready=%s", k, np.linalg.norm(r), np.linalg.norm(v_rel), position_ready, velocity_ready)
+            # saw_position_goal = saw_position_goal or position_ready
 
-            v_rel = jac.dot(u_q) + u_b - v_o
-            position_ready = np.linalg.norm(np.asarray(r)) <= cfg.grasp_pos_tol
-            velocity_ready = np.linalg.norm(np.asarray(v_rel)) <= cfg.grasp_vel_tol
-            rospy.loginfo("Rollout step %d: r_norm=%.4f, v_rel_norm=%.4f, position_ready=%s, velocity_ready=%s", k, np.linalg.norm(np.asarray(r)), np.linalg.norm(np.asarray(v_rel)), position_ready, velocity_ready)
-            saw_position_goal = saw_position_goal or position_ready
-            # rospy.loginfo(
-            #     "Rollout step %d/%d: p_o=%s, b=%s, p_ee=%s, r=%s, v_rel=%s, position_ready=%s, velocity_ready=%s",
-            #     k, N, p_o, b, p_ee, r, v_rel, position_ready, velocity_ready
-            # )
-    
-            if position_ready and velocity_ready:
-                record_entry_outcome("grasp_ready")
-                # rospy.loginfo("Rollout step %d: position and velocity ready; returning early", k)
-                return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
-            if position_ready:
-                rospy.logwarn_throttle(
-                    1.0,
-                    "Position tolerance reached but relative speed %.4f exceeds %.4f m/s; continuing rollout",
-                    np.linalg.norm(v_rel),
-                    cfg.grasp_vel_tol,
-                )
+            # pt = JointTrajectoryPoint()
+            # pt.positions = [float(x) for x in q.tolist()]
+            # pt.velocities = [float(x) for x in u_q.tolist()]
+            # pt.time_from_start = rospy.Duration.from_sec(t_s)
+            # traj.joint_trajectory.points.append(pt)
+
+            # if position_ready and velocity_ready:
+            #     record_entry_outcome("grasp_ready")
+            #     # rospy.loginfo("Rollout step %d: position and velocity ready; returning early", k)
+            #     return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
+            # if position_ready:
+            #     rospy.logwarn_throttle(
+            #         1.0,
+            #         "Position tolerance reached but relative speed %.4f exceeds %.4f m/s; continuing rollout",
+            #         np.linalg.norm(v_rel),
+            #         cfg.grasp_vel_tol,
+            #     )
             
 
         rospy.loginfo("dt=%.3f, object_dt=%.3f, min_ee_dist=%.3f, last_ee_dist=%.3f, p_o=%s, b=%s, ee_pos=%s, ee_local_pos=%s", cfg.dt, o_dt, min_ee_dist, last_ee_dist, p_o, b, p_ee, p_ee_local)
         rospy.loginfo(
-            "Object/base reach distance %.3f m; allowed [%.3f, %.3f] m ; last valid rollout length %d",
-            object_base_dist, cfg.reach_min, cfg.reach_max, last_valid_len
+            "Object/base reach distance %.3f m; allowed [%.3f, %.3f] m ; t=%s, tau=%s; last valid rollout length %d",
+            object_base_dist, cfg.reach_min, cfg.reach_max, t_s, tau, last_valid_len
         )
         with open(out_path, "a") as f:
                         f.write(

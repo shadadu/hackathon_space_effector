@@ -15,7 +15,10 @@ from moveit_msgs.srv import GetStateValidity, GetStateValidityRequest
 
 from object_tracking.dgm_jax import (
     adam_init,
+    build_input,
     init_mlp_params,
+    init_piratenet_params,
+    fit_piratenet_output_lstsq,
     load_checkpoint as load_jax_checkpoint,
     make_batch,
     policy_grad_q_np,
@@ -354,6 +357,10 @@ def main_():
     lr = float(rospy.get_param("~lr", 3e-4))
     hidden = int(rospy.get_param("~hidden", 192))
     depth = int(rospy.get_param("~depth", 32))
+    architecture = str(rospy.get_param("~architecture", "piratenet")).strip().lower()
+    pirate_blocks = int(rospy.get_param("~pirate_blocks", 4))
+    fourier_scale = float(rospy.get_param("~fourier_scale", 1.0))
+    physics_init = as_bool(rospy.get_param("~physics_init", True))
     out_path = rospy.get_param(
         "~out_path",
         "/root/catkin_ws/src/object_tracking/models/panda_dgm_v1.pkl"
@@ -389,10 +396,21 @@ def main_():
 
     seed = int(rospy.get_param("~seed", 0))
     if as_bool(load_model):
-        model, opt_state, _ = load_pretrain_chkpt(pretrain_path, hidden=hidden, depth=depth)
+        model, opt_state, loaded_meta = load_pretrain_chkpt(pretrain_path, hidden=hidden, depth=depth)
+        architecture = str(loaded_meta.get("architecture", "mlp")).lower()
         rospy.loginfo("Loaded pretrained model from %s. Starting training with this model.", pretrain_path)
     else:
-        model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=11, hidden=hidden, depth=depth)
+        if architecture == "piratenet":
+            model = init_piratenet_params(
+                jax.random.PRNGKey(seed), in_dim=11, hidden=hidden,
+                blocks=pirate_blocks, fourier_scale=fourier_scale,
+                input_min=np.concatenate([jmin, [0.0], [0.25, -0.30, 0.10]]),
+                input_max=np.concatenate([jmax, [1.0], [0.65, 0.30, 0.60]]),
+            )
+        elif architecture == "mlp":
+            model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=11, hidden=hidden, depth=depth)
+        else:
+            raise ValueError("~architecture must be either 'mlp' or 'piratenet'")
         opt_state = adam_init(model)
         rospy.loginfo("No pretrained model loaded. Starting training with a new model initialized")
 
@@ -402,6 +420,7 @@ def main_():
     t_loss = 0.0
     t_loss_pde = 0.0
     t_loss_term = 0.0
+    physics_init_pending = physics_init and architecture == "piratenet" and not as_bool(load_model)
     itr = 50
     bt = max(bt_max, batch // 3)
 
@@ -539,6 +558,13 @@ def main_():
             r_inv_diag_np=R_inv_diag,
         )
 
+        if physics_init_pending:
+            terminal_x = build_input(train_batch["q_t"], train_batch["t_t"], train_batch["g_t"])
+            model = fit_piratenet_output_lstsq(model, terminal_x, train_batch["phi_t"])
+            opt_state = adam_init(model)
+            physics_init_pending = False
+            rospy.loginfo("Initialized PirateNet output layer from terminal boundary values")
+
         model, opt_state, loss, loss_pde, loss_term = train_step(model, opt_state, train_batch, lr, Cpd, Ctr)
         loss = float(loss)
         loss_pde = float(loss_pde)
@@ -575,7 +601,9 @@ def main_():
         out_path,
         model,
         opt_state,
-        meta={"in_dim": 11, "hidden": hidden, "depth": depth, "T": T, "framework": "jax"},
+        meta={"in_dim": 11, "hidden": hidden, "depth": depth, "T": T, "framework": "jax",
+              "architecture": architecture, "pirate_blocks": pirate_blocks, "fourier_scale": fourier_scale,
+              "physics_init": physics_init},
         loss=float(loss),
     )
 
@@ -743,7 +771,9 @@ def main_():
         out_path,
         model,
         opt_state,
-        meta={"in_dim": 11, "hidden": hidden, "depth": depth, "T": T, "framework": "jax"},
+        meta={"in_dim": 11, "hidden": hidden, "depth": depth, "T": T, "framework": "jax",
+              "architecture": architecture, "pirate_blocks": pirate_blocks, "fourier_scale": fourier_scale,
+              "physics_init": physics_init},
         loss=float(loss),
     )
 

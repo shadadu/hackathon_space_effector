@@ -12,9 +12,15 @@ import rospy
 from moveit_commander import MoveGroupCommander
 from moveit_msgs.srv import GetStateValidity
 
-from object_tracking.dgm_jax import init_mlp_params, load_checkpoint, save_checkpoint
+from object_tracking.dgm_jax import (
+    init_mlp_params,
+    init_piratenet_params,
+    fit_piratenet_output_lstsq,
+    load_checkpoint,
+    save_checkpoint,
+)
 from object_tracking.fk_client import FKClient
-from object_tracking.micro_g_dgm_hjb_loss import adam_init, make_batch, train_step
+from object_tracking.micro_g_dgm_hjb_loss import adam_init, build_input, make_batch, train_step
 
 
 from moveit_msgs.msg import RobotState
@@ -205,7 +211,8 @@ def make_training_batch(
         batch, rel_min, rel_max, goal_tol, entry_guard_width
     )
     v_o_np = sample_const_velocities(batch, vo_min, vo_max) # sample constant object velocities, consistent with the t/tau progression in the rollout
-    tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+    # tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
+    tau_np = np.asarray(list(range(batch, 0, -1)), dtype=np.float64).reshape((batch, 1)) * (T / batch) # linearly decreasing tau from T to 0
     jac_np = jacobian_batch(group, q_np)
     p_ee_local_np = fk_position_batch(fk_client, active_joints, q_np)
 
@@ -231,7 +238,8 @@ def make_training_batch(
     b_g_np = sample_box(bt, base_min, base_max)
     r_g_np = sample_absorbing_goal(bt, goal_tol)
     v_o_g_np = sample_const_velocities(bt, vo_min, vo_max)
-    tau_g_np = np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)
+    # tau_g_np = np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)
+    tau_g_np = np.asarray(list(range(bt, 0, -1)), dtype=np.float64).reshape((bt, 1)) * (T / bt) # linearly decreasing tau from T to 0
     phi_g_np = np.zeros((bt,), dtype=np.float64)
     jac_g_np = jacobian_batch(group, q_g_np)
 
@@ -285,6 +293,10 @@ def main():
         raise ValueError("~grad_clip_norm must be positive")
     hidden = int(rospy.get_param("~hidden", 220))
     depth = int(rospy.get_param("~depth", 28))
+    architecture = str(rospy.get_param("~architecture", "piratenet")).strip().lower()
+    pirate_blocks = int(rospy.get_param("~pirate_blocks", 4))
+    fourier_scale = float(rospy.get_param("~fourier_scale", 1.0))
+    physics_init = as_bool(rospy.get_param("~physics_init", True))
     seed = int(rospy.get_param("~seed", 0))
     load_model = as_bool(rospy.get_param("~load_model", False))
     out_path = rospy.get_param(
@@ -354,9 +366,23 @@ def main():
             use_validity = False
 
     if load_model:
-        model, opt_state, _ = load_pretrain(pretrain_path)
+        model, opt_state, loaded_meta = load_pretrain(pretrain_path)
+        architecture = str(loaded_meta.get("architecture", "mlp")).lower()
     else:
-        model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=17, hidden=hidden, depth=depth)
+        if architecture == "piratenet":
+            model = init_piratenet_params(
+                jax.random.PRNGKey(seed),
+                in_dim=17,
+                hidden=hidden,
+                blocks=pirate_blocks,
+                fourier_scale=fourier_scale,
+                input_min=np.concatenate([jmin, base_min, rel_min, vo_min, [0.0]]),
+                input_max=np.concatenate([jmax, base_max, rel_max, vo_max, [T]]),
+            )
+        elif architecture == "mlp":
+            model = init_mlp_params(jax.random.PRNGKey(seed), in_dim=17, hidden=hidden, depth=depth)
+        else:
+            raise ValueError("~architecture must be either 'mlp' or 'piratenet'")
         opt_state = adam_init(model)
 
     train_perf_path = rospy.get_param(
@@ -369,6 +395,10 @@ def main():
         "in_dim": 17,
         "hidden": hidden,
         "depth": depth,
+        "architecture": architecture,
+        "pirate_blocks": pirate_blocks,
+        "fourier_scale": fourier_scale,
+        "physics_init": physics_init,
         "T": T,
         "state": "q,b,r,v_o,tau",
         "controls": "joint_velocity,base_velocity",
@@ -393,6 +423,7 @@ def main():
 
     t0 = time.time()
     last_loss = 0.0
+    physics_init_pending = physics_init and architecture == "piratenet" and not load_model
     log_every = int(rospy.get_param("~log_every", 50))
     for it in range(1, iters + 1):
         train_batch = make_training_batch(
@@ -429,6 +460,22 @@ def main():
             fk_client=fk_client,
             use_validity=use_validity,
         )
+        if physics_init_pending:
+            boundary_x = jnp.concatenate([
+                build_input(
+                    train_batch["q_t"], train_batch["b_t"], train_batch["r_t"],
+                    train_batch["v_o_t"], train_batch["tau_t"],
+                ),
+                build_input(
+                    train_batch["q_g"], train_batch["b_g"], train_batch["r_g"],
+                    train_batch["v_o_g"], train_batch["tau_g"],
+                ),
+            ], axis=0)
+            boundary_targets = jnp.concatenate([train_batch["phi_t"], train_batch["phi_g"]])
+            model = fit_piratenet_output_lstsq(model, boundary_x, boundary_targets)
+            opt_state = adam_init(model)
+            physics_init_pending = False
+            rospy.loginfo("Initialized PirateNet output layer from timeout and goal boundaries")
         model, opt_state, loss, loss_pde, loss_timeout, loss_goal = train_step(
             model, opt_state, train_batch, lr, Cpd, Ctr, Cgoal, grad_clip_norm
         )

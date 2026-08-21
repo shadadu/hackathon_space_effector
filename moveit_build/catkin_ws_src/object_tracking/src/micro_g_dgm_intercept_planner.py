@@ -131,10 +131,10 @@ class MicroGDGMInterceptPlanner:
         return 0.0 <= age <= self.object_max_age_s
 
     def loop(self):
-        max_attempts = 4
+        max_attempts = 2
         attempts = 0
         rate = rospy.Rate(float(rospy.get_param("~loop_hz", 2.0)))
-        while not rospy.is_shutdown() and attempts <= max_attempts:
+        while not rospy.is_shutdown() and attempts < max_attempts:
             if not self.busy:
                 resp = self.process_once()
                 rospy.logdebug("process_once returned: %s", resp)

@@ -3,6 +3,8 @@ from typing import Any, Dict, List, Tuple
 import jax
 import jax.numpy as jnp
 
+from .dgm_jax import apply_value
+
 
 Params = List[Dict[str, jnp.ndarray]]
 AdamState = Dict[str, Any]
@@ -12,21 +14,13 @@ def build_input(q, b, r, v_o, tau):
     return jnp.concatenate([q, b, r, v_o, tau], axis=-1)
 
 
-def apply_mlp(params: Params, x):
-    y = x
-    for layer in params[:-1]:
-        y = jnp.tanh(jnp.matmul(y, layer["w"]) + layer["b"])
-    y = jnp.matmul(y, params[-1]["w"]) + params[-1]["b"]
-    return jnp.squeeze(y, axis=-1)
-
-
 def value_scalar(params: Params, q, b, r, v_o, tau):
     q = jnp.asarray(q, dtype=jnp.float32).reshape(1, 7)
     b = jnp.asarray(b, dtype=jnp.float32).reshape(1, 3)
     r = jnp.asarray(r, dtype=jnp.float32).reshape(1, 3)
     v_o = jnp.asarray(v_o, dtype=jnp.float32).reshape(1, 3)
     tau = jnp.asarray(tau, dtype=jnp.float32).reshape(1, 1)
-    return apply_mlp(params, build_input(q, b, r, v_o, tau))[0]
+    return apply_value(params, build_input(q, b, r, v_o, tau))[0]
 
 
 def value_and_grads(params: Params, q, b, r, v_o, tau):
@@ -104,7 +98,7 @@ def value_grads_batch(params: Params, batch: Dict[str, jnp.ndarray], suffix: str
 
 
 def timeout_loss(params: Params, batch: Dict[str, jnp.ndarray]):
-    v_t = apply_mlp(
+    v_t = apply_value(
         params,
         build_input(
             batch["q_t"],
@@ -119,7 +113,7 @@ def timeout_loss(params: Params, batch: Dict[str, jnp.ndarray]):
 
 def goal_loss(params: Params, batch: Dict[str, jnp.ndarray]):
     """Apply V=0 only where the derived action also meets the velocity guard."""
-    v_g = apply_mlp(
+    v_g = apply_value(
         params,
         build_input(
             batch["q_g"],

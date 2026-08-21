@@ -16,6 +16,13 @@ lr: 0.0003
 hidden: 256
 depth: 4
 
+# Value-network backend. A PirateNet block contains three dense layers and
+# starts as an identity map through its zero-initialized adaptive skip.
+architecture: piratenet
+pirate_blocks: 4
+fourier_scale: 1.0
+physics_init: true
+
 Qp: 10.0
 Qp_terminal: 80.0
 
