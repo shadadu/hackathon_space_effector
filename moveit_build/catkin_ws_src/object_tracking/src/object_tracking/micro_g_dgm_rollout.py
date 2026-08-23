@@ -197,10 +197,20 @@ def rollout_micro_g_dgm_policy(
     last_u_q = None
     last_u_b = None
 
-    for k in range(N):
-        t_s = min(k * cfg.dt, cfg.T)
+    T = 20.0
+    batch =192
+    bt = int( max(64, batch // 3))
+
+    tau_np = np.asarray(list(range(batch, 0, -1)), dtype=np.float64).reshape((batch, 1)) * (T / batch) # linearly decreasing tau from T to 0
+    tau_t_np = np.zeros((bt, 1), dtype=np.float64)
+    tau_g_np = np.asarray(list(range(bt, 0, -1)), dtype=np.float64).reshape((bt, 1)) * (T / bt) # linearly decreasing tau from T to 0
+    tau_T = np.concatenate((tau_np, tau_t_np, tau_g_np), axis=0)
+    # for k in range(N):
+    for k in tau_T[0:len(tau_T)-1]: 
+        dt = tau_T[k][0] - tau_T[k+1][0]
+        # t_s = min(k * cfg.dt, cfg.T)
         # tau is remaining time; the timeout boundary used in training is tau=0.
-        tau = cfg.T - t_s
+        tau = tau_T[k][0]
         # rospy.loginfo("Rollout step %d/%d: t=%s, tau=%s", k, N, t_s, tau)
 
         latest_odom = get_latest_object_state(object_odom, object_state_provider)
@@ -304,8 +314,8 @@ def rollout_micro_g_dgm_policy(
             )
 
         if k < N - 1:
-            q = q + cfg.dt * u_q
-            b = b + cfg.dt * u_b
+            q = q + dt * u_q
+            b = b + dt * u_b
             if cfg.joint_min is not None and cfg.joint_max is not None:
                 q = clamp(q, cfg.joint_min, cfg.joint_max)
             if cfg.base_min is not None and cfg.base_max is not None:
