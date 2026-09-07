@@ -289,7 +289,6 @@ class TrajectoryExecutorManager:
         mpr.max_velocity_scaling_factor = self.vel_scale
         mpr.max_acceleration_scaling_factor = self.acc_scale
         mpr.start_state = self.start_state
-        # rospy.loginfo("Start position =%s and distance from goal =%s", start_position)
         mpr.goal_constraints = [make_position_only_constraints(goal, self.ee_link, pos_tol=1.0)]
         # mpr.goal_constraints = [make_goal_constraints_from_pose(goal, self.ee_link,
         #                                                         pos_tol=eps_pos,
@@ -335,7 +334,7 @@ class TrajectoryExecutorManager:
                       , ee_position)
         rospy.loginfo("Received planning service response %s, %s, %s", resp.group_name, resp.planning_time,
                       resp.error_code.val)
-        rospy.loginfo("End Effector final position: [%s,%s,%s]", ee_position.x, ee_position.y, ee_position.z)
+        rospy.loginfo("End Effector position: [%s,%s,%s]", ee_position.x, ee_position.y, ee_position.z)
 
         return resp, dt
 
@@ -412,7 +411,7 @@ class TrajectoryExecutorManager:
             return
 
         ee_pos = get_panda_start_pose(start_state=self.start_state)
-        rospy.loginfo("TrajectoryExecutorManager @ _attemp_step end-effector pos = %s", ee_pos)
+        rospy.loginfo("TrajectoryExecutorManager @ _attempt_step end-effector pos = %s", ee_pos)
 
         # Update mins while active
         if self.last_metrics is not None:
