@@ -181,7 +181,11 @@ def rollout_micro_g_dgm_policy(
     b = np.asarray(b0, dtype=np.float64).reshape(3).copy()
     p_o, v_o, stamp = object_state_from_odom(object_odom)
 
-    N = int(round(cfg.T / cfg.dt)) + 1
+    if not np.isfinite(cfg.T) or cfg.T <= 0.0:
+        raise ValueError("Rollout T must be finite and positive")
+    if not np.isfinite(cfg.dt) or cfg.dt <= 0.0:
+        raise ValueError("Rollout dt must be finite and positive")
+    N = int(np.ceil(cfg.T / cfg.dt)) + 1
     q_hist = np.zeros((N, 7), dtype=np.float64)
     b_hist = np.zeros((N, 3), dtype=np.float64)
     r_hist = np.zeros((N, 3), dtype=np.float64)
@@ -197,21 +201,11 @@ def rollout_micro_g_dgm_policy(
     last_u_q = None
     last_u_b = None
 
-    T = 20.0
-    batch =192
-    bt = int( max(64, batch // 3))
-
-    tau_np = np.asarray(list(range(batch, 0, -1)), dtype=np.float64).reshape((batch, 1)) * (T / batch) # linearly decreasing tau from T to 0
-    tau_t_np = np.zeros((bt, 1), dtype=np.float64)
-    tau_g_np = np.asarray(list(range(bt, 0, -1)), dtype=np.float64).reshape((bt, 1)) * (T / bt) # linearly decreasing tau from T to 0
-    tau_T = np.concatenate((tau_np, tau_t_np, tau_g_np), axis=0)
-    # for k in range(N):
-    for k in tau_T[0:len(tau_T)-1]: 
-        dt = tau_T[k][0] - tau_T[k+1][0]
-        # t_s = min(k * cfg.dt, cfg.T)
+    for k in range(N):
+        t_s = min(k * cfg.dt, cfg.T)
         # tau is remaining time; the timeout boundary used in training is tau=0.
-        tau = tau_T[k][0]
-        # rospy.loginfo("Rollout step %d/%d: t=%s, tau=%s", k, N, t_s, tau)
+        tau = max(0.0, cfg.T - t_s)
+        dt = min(cfg.dt, tau)
 
         latest_odom = get_latest_object_state(object_odom, object_state_provider)
         p_o = None
@@ -279,10 +273,10 @@ def rollout_micro_g_dgm_policy(
             u_q = np.zeros(7, dtype=np.float64)
             u_b = np.zeros(3, dtype=np.float64)
 
-        # rospy.loginfo("Rollout step %d: u_q=%s, u_b=%s", k, u_q, u_b)
+        rospy.loginfo("Rollout step %d: u_q=%s, u_b=%s", k, u_q, u_b)
         u_q = clamp(u_q, -cfg.joint_vel_limits, cfg.joint_vel_limits)
         u_b = clamp(u_b, -cfg.base_vel_limits, cfg.base_vel_limits)
-        # rospy.loginfo("Rollout step clamped %d: u_q=%s, u_b=%s", k, u_q, u_b)
+        rospy.loginfo("Rollout step clamped %d: u_q=%s, u_b=%s", k, u_q, u_b)
         last_u_q = u_q.copy()
         last_u_b = u_b.copy()
 
@@ -361,8 +355,8 @@ def rollout_micro_g_dgm_policy(
 
         rospy.loginfo("dt=%.3f, object_dt=%.3f, min_ee_dist=%.3f, last_ee_dist=%.3f, p_o=%s, b=%s, ee_pos=%s, ee_local_pos=%s", cfg.dt, o_dt, min_ee_dist, last_ee_dist, p_o, b, p_ee, p_ee_local)
         rospy.loginfo(
-            "Object/base reach distance %.3f m; allowed [%.3f, %.3f] m ; t=%s, tau=%s; last valid rollout length %d",
-            object_base_dist, cfg.reach_min, cfg.reach_max, t_s, tau, last_valid_len
+            "Object/base reach distance %.3f m; allowed [%.3f, %.3f] m ; tau=%s; last valid rollout length %d",
+            object_base_dist, cfg.reach_min, cfg.reach_max, tau, last_valid_len
         )
         with open(out_path, "a") as f:
                         f.write(
