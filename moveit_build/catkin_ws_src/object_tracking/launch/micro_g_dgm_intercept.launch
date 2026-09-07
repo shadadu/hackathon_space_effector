@@ -1,4 +1,6 @@
 <launch>
+  <!-- Set false when bring_up.sh already started the planner service. -->
+  <arg name="start_planner" default="true"/>
   <arg name="model_path" default="$(find object_tracking)/models/micro_g_dgm_v1.pkl"/>
   <arg name="plan_service" default="/micro_g_dgm/get_motion_plan"/>
   <arg name="ik_service" default="/compute_ik"/>
@@ -22,7 +24,7 @@
   <arg name="hard_reachability_checks" default="true"/>
   <arg name="service_wait_timeout" default="30.0"/>
 
-  <node pkg="object_tracking"
+  <node if="$(arg start_planner)" pkg="object_tracking"
         type="micro_g_dgm_planner_node.py"
         name="micro_g_dgm_planner_node"
         output="screen"
