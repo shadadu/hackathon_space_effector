@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import time
+import traceback
 from pathlib import Path
 
 import numpy as np
@@ -319,6 +320,7 @@ class MicroGDGMPlannerService:
 
         t0 = time.time()
         try:
+            rospy.loginfo("Rolling out micro-g DGM policy for T=%.3fs, dt=%.3fs", cfg.T, cfg.dt)
             traj, _, b_hist, r_hist = rollout_micro_g_dgm_policy(
                 model=self.model,
                 q0=q0,
@@ -331,7 +333,7 @@ class MicroGDGMPlannerService:
                 object_state_provider=self.latest_object_odom,
             )
         except Exception as exc:
-            rospy.logerr("Micro-g DGM rollout failed: %s", exc)
+            rospy.logerr("Micro-g DGM rollout failed: %s\n%s", exc, traceback.format_exc())
             resp.error_code.val = MoveItErrorCodes.PLANNING_FAILED
             return GetMotionPlanResponse(motion_plan_response=resp)
 
