@@ -18,6 +18,7 @@ from object_tracking.micro_g_dgm_rollout import (
     MicroGRolloutConfig,
     is_target_reachable,
     object_state_from_odom,
+    rollout_micro_g_dgm_persistent_policy,
     rollout_micro_g_dgm_policy,
     target_reach_distance,
 )
@@ -306,7 +307,7 @@ class MicroGDGMPlannerService:
             base_min=self.base_min,
             base_max=self.base_max,
             grasp_pos_tol=float(
-                rospy.get_param("~goal_tol", rospy.get_param("~grasp_pos_tol", 0.8))
+                rospy.get_param("~goal_tol", rospy.get_param("~grasp_pos_tol", 0.25))
             ),
             grasp_vel_tol=float(rospy.get_param("~grasp_vel_tol", 0.8)),
             entry_guard_width=float(rospy.get_param("~entry_guard_width", 0.10)),
@@ -321,7 +322,7 @@ class MicroGDGMPlannerService:
         t0 = time.time()
         try:
             rospy.loginfo("Rolling out micro-g DGM policy for T=%.3fs, dt=%.3fs", cfg.T, cfg.dt)
-            traj, _, b_hist, r_hist = rollout_micro_g_dgm_policy(
+            traj, _, b_hist, r_hist = rollout_micro_g_dgm_persistent_policy(
                 model=self.model,
                 q0=q0,
                 b0=b0,
