@@ -211,8 +211,9 @@ def make_training_batch(
         batch, rel_min, rel_max, goal_tol, entry_guard_width
     )
     v_o_np = sample_const_velocities(batch, vo_min, vo_max) # sample constant object velocities, consistent with the t/tau progression in the rollout
-    # tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)
-    tau_np = np.asarray(list(range(batch, 0, -1)), dtype=np.float64).reshape((batch, 1)) * (T / batch) # linearly decreasing tau from T to 0
+    tau_np = np.random.uniform(0.0, T, (batch, 1)).astype(np.float64)[::-1]
+    # tau_np = np.sort(np.random.uniform(0.0, T, (batch, 1)).astype(np.float64))
+    # tau_np = np.asarray(list(range(batch, 0, -1)), dtype=np.float64).reshape((batch, 1)) * (T / batch) # linearly decreasing tau from T to 0
     jac_np = jacobian_batch(group, q_np)
     p_ee_local_np = fk_position_batch(fk_client, active_joints, q_np)
 
@@ -238,8 +239,9 @@ def make_training_batch(
     b_g_np = sample_box(bt, base_min, base_max)
     r_g_np = sample_absorbing_goal(bt, goal_tol)
     v_o_g_np = sample_const_velocities(bt, vo_min, vo_max)
-    # tau_g_np = np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)
-    tau_g_np = np.asarray(list(range(bt, 0, -1)), dtype=np.float64).reshape((bt, 1)) * (T / bt) # linearly decreasing tau from T to 0
+    tau_g_np = np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)[::-1]
+    # tau_g_np = np.sort(np.random.uniform(0.0, T, (bt, 1)).astype(np.float64)) 
+    # tau_g_np = np.asarray(list(range(bt, 0, -1)), dtype=np.float64).reshape((bt, 1)) * (T / bt) # linearly decreasing tau from T to 0
     phi_g_np = np.zeros((bt,), dtype=np.float64)
     jac_g_np = jacobian_batch(group, q_g_np)
 
