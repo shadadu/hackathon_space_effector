@@ -386,3 +386,270 @@ def rollout_micro_g_dgm_policy(
             )
         )
     return traj, q_hist, b_hist, r_hist
+
+
+
+def rollout_micro_g_dgm_persistent_policy(
+        model: Any,
+        q0: np.ndarray,
+        b0: np.ndarray,
+        object_odom: Odometry,
+        active_joints: List[str],
+        group: Any,
+        cfg: MicroGRolloutConfig,
+        fk_client: Any = None,
+        object_state_provider: Optional[Callable[[], Optional[Odometry]]] = None,
+) -> Tuple[RobotTrajectory, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Roll out the micro-g value policy with state (q, b, r, v_o, tau).
+
+    If object_state_provider is supplied, the object pose/velocity is re-read at
+    each step. That is the hook used by a receding-horizon planner to re-estimate
+    p_o and v_o every planning cycle.
+    """
+
+    out_path = rospy.get_param(
+            "~out_path",
+            "/root/catkin_ws/src/object_tracking/models/rollout_micro_g_dgm_policy_path.csv",
+        )
+
+    os.makedirs(os.path.dirname(out_path), exist_ok=True)
+    with open(out_path, "a") as f:
+        f.write("dt,o_dt,min_reach_dist,p_o,b,p_ee,p_ee_local\n")
+
+    rospy.loginfo("Rollout micro-g DGM Persistent policy with q0=%s, b0=%s, object_odom=%s", q0, b0, object_odom)
+    rospy.loginfo("Rollout micro-g DGM policy config: %s", cfg)
+    q = np.asarray(q0, dtype=np.float64).reshape(7).copy()
+    b = np.asarray(b0, dtype=np.float64).reshape(3).copy()
+    p_o, v_o, stamp = object_state_from_odom(object_odom)
+
+    if not np.isfinite(cfg.T) or cfg.T <= 0.0:
+        raise ValueError("Rollout T must be finite and positive")
+    if not np.isfinite(cfg.dt) or cfg.dt <= 0.0:
+        raise ValueError("Rollout dt must be finite and positive")
+    N = int(np.ceil(cfg.T / cfg.dt)) + 1
+    q_hist = np.zeros((N, 7), dtype=np.float64)
+    b_hist = np.zeros((N, 3), dtype=np.float64)
+    r_hist = np.zeros((N, 3), dtype=np.float64)
+
+    traj = RobotTrajectory()
+    traj.joint_trajectory.joint_names = list(active_joints)
+
+    last_reach_dist = None
+    last_valid_len = 0
+    min_ee_dist = None
+    nan_hits = 0
+    saw_position_goal = False
+    last_u_q = None
+    last_u_b = None
+
+    ###### GET initial fk_client position and distance to object
+    k=0
+    t_s = k * cfg.dt
+    TOL=0.15
+
+    latest_odom = get_latest_object_state(object_odom, object_state_provider)
+    p_o = None
+    o_dt = 0.0
+    msg_age = (rospy.Time.now() - stamp).to_sec()
+    o_dt = msg_age
+    # p_o, v_o = predict_object_state(object_odom, msg_age + t_s)
+    # rospy.loginfo("Predicted object state at t=%s: p_o=%s, v_o=%s", msg_age + t_s, p_o, v_o)
+    if latest_odom is not object_odom:
+        object_odom = latest_odom
+        p_o, v_o, stamp = object_state_from_odom(object_odom)
+    else:
+        msg_age = (rospy.Time.now() - stamp).to_sec()
+        o_dt = msg_age
+        p_o, v_o = predict_object_state(object_odom, msg_age + t_s)
+
+    # rospy.loginfo("Rollout step %d/%d: t=%s, tau=%s", k, N, t_s, tau)
+
+    if fk_client is None:
+        pose = group.get_current_pose().pose
+        p_ee_local = point_to_np(pose.position)
+        rospy.loginfo("Rollout step %d/%d: FK from group: p_ee_local=%s", k, N, p_ee_local)
+    else:
+        p_ee_local = fk_client.ee_position(active_joints, q)
+        rospy.loginfo("Rollout step %d/%d: FK from client: p_ee_local=%s", k, N, p_ee_local)
+    p_ee = b + p_ee_local
+    r = p_ee - p_o
+
+
+    ######
+    
+
+    while (k < N) and (np.linalg.norm(r) > TOL):
+        rospy.loginfo("Initiate a Rollout step %d/%d: r=%s, norm(r)=%s", k, N, r, np.linalg.norm(r))
+        
+
+        # t_s = min(k * cfg.dt, cfg.T)
+        t_s = k * cfg.dt
+        # tau is remaining time; the timeout boundary used in training is tau=0.
+        tau = max(0.0, abs(cfg.T - t_s))
+        dt = min(cfg.dt, tau)
+
+        latest_odom = get_latest_object_state(object_odom, object_state_provider)
+        p_o = None
+        o_dt = 0.0
+        msg_age = (rospy.Time.now() - stamp).to_sec()
+        o_dt = msg_age
+        # p_o, v_o = predict_object_state(object_odom, msg_age + t_s)
+        # rospy.loginfo("Predicted object state at t=%s: p_o=%s, v_o=%s", msg_age + t_s, p_o, v_o)
+        if latest_odom is not object_odom:
+            object_odom = latest_odom
+            p_o, v_o, stamp = object_state_from_odom(object_odom)
+        else:
+            msg_age = (rospy.Time.now() - stamp).to_sec()
+            o_dt = msg_age
+            p_o, v_o = predict_object_state(object_odom, msg_age + t_s)
+
+        # rospy.loginfo("Rollout step %d/%d: t=%s, tau=%s", k, N, t_s, tau)
+
+        if fk_client is None:
+            pose = group.get_current_pose().pose
+            p_ee_local = point_to_np(pose.position)
+            rospy.loginfo("Rollout step %d/%d: FK from group: p_ee_local=%s", k, N, p_ee_local)
+        else:
+            p_ee_local = fk_client.ee_position(active_joints, q)
+            rospy.loginfo("Rollout step %d/%d: FK from client: p_ee_local=%s", k, N, p_ee_local)
+        p_ee = b + p_ee_local
+        r = p_ee - p_o
+
+        jac = jacobian_from_group(group, q)
+
+        q_hist[k, :] = q
+        b_hist[k, :] = b
+        r_hist[k, :] = r
+
+        # At tau=0, use the last applied command to check entry before timeout.
+        if tau <= 0.0:
+            t_s = 0.0
+            tau = max(0.0, abs(cfg.T - t_s))
+            dt = min(cfg.dt, tau)
+            rospy.loginfo("Rollout step %d/%d: tau=%s, position not ready; resetting time and continuing", k, N, tau)
+            if last_u_q is not None:
+                terminal_v_rel = jac.dot(last_u_q) + last_u_b - v_o
+                position_ready = np.linalg.norm(r) <= cfg.grasp_pos_tol
+                velocity_ready = np.linalg.norm(terminal_v_rel) <= cfg.grasp_vel_tol
+                saw_position_goal = saw_position_goal or position_ready
+                if position_ready and velocity_ready:
+                    pt = JointTrajectoryPoint()
+                    pt.positions = [float(x) for x in q.tolist()]
+                    pt.velocities = [float(x) for x in last_u_q.tolist()]
+                    pt.time_from_start = rospy.Duration.from_sec(t_s)
+                    traj.joint_trajectory.points.append(pt)
+                    record_entry_outcome("grasp_ready")
+                    return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
+            last_valid_len = k + 1
+            # reset time and continue to next iteration to get new object state
+            
+            # continue
+
+        u_q, u_b = policy_np(
+            model, q, b, r, v_o, np.array([tau], dtype=np.float64),
+            jac, cfg.R_q_diag, cfg.R_b_diag,
+            cfg.grasp_pos_tol, cfg.entry_guard_width, cfg.entry_velocity_weight,
+        )
+        u_q = np.asarray(u_q, dtype=np.float64).reshape(7)
+        u_b = np.asarray(u_b, dtype=np.float64).reshape(3)
+
+        if not np.all(np.isfinite(u_q)) or not np.all(np.isfinite(u_b)):
+            nan_hits += 1
+            if nan_hits > cfg.max_nan_guard:
+                raise RuntimeError("micro-g DGM rollout: too many non-finite controls")
+            u_q = np.zeros(7, dtype=np.float64)
+            u_b = np.zeros(3, dtype=np.float64)
+
+        rospy.loginfo("Rollout step %d/%d: u_q=%s, u_b=%s", k, N, u_q, u_b)
+        u_q = clamp(u_q, -cfg.joint_vel_limits, cfg.joint_vel_limits)
+        u_b = clamp(u_b, -cfg.base_vel_limits, cfg.base_vel_limits)
+        rospy.loginfo("Rollout step clamped %d/%d: u_q=%s, u_b=%s", k, N, u_q, u_b)
+        last_u_q = u_q.copy()
+        last_u_b = u_b.copy()
+
+        v_rel = jac.dot(u_q) + u_b - v_o
+        position_ready = np.linalg.norm(r) <= cfg.grasp_pos_tol
+        velocity_ready = np.linalg.norm(v_rel) <= cfg.grasp_vel_tol
+        saw_position_goal = saw_position_goal or position_ready
+        rospy.loginfo(
+            "Rollout step %d/%d: p_o=%s, b=%s, p_ee=%s, r=%s, v_rel=%s, position_ready=%s, velocity_ready=%s",
+            k, N, p_o, b, p_ee, r, v_rel, position_ready, velocity_ready
+        )
+
+        pt = JointTrajectoryPoint()
+        pt.positions = [float(x) for x in q.tolist()]
+        pt.velocities = [float(x) for x in u_q.tolist()]
+        pt.time_from_start = rospy.Duration.from_sec(t_s)
+        traj.joint_trajectory.points.append(pt)
+
+        if position_ready and velocity_ready:
+            record_entry_outcome("grasp_ready")
+            rospy.loginfo("Rollout step %d/%d and ee obj distance %.3f: position and velocity ready; returning early", k, N, np.linalg.norm(r))
+            # return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
+        if position_ready:
+            rospy.logwarn_throttle(
+                1.0,
+                "Position tolerance reached but relative speed %.4f exceeds %.4f m/s; continuing rollout",
+                np.linalg.norm(v_rel),
+                cfg.grasp_vel_tol,
+            )
+
+        if k < N - 1:
+            q = q + dt * u_q
+            b = b + dt * u_b
+            if cfg.joint_min is not None and cfg.joint_max is not None:
+                q = clamp(q, cfg.joint_min, cfg.joint_max)
+            if cfg.base_min is not None and cfg.base_max is not None:
+                b = clamp(b, cfg.base_min, cfg.base_max)
+
+            if fk_client is None:
+                pose = group.get_current_pose().pose
+                p_ee_local = point_to_np(pose.position)
+            else:
+                p_ee_local = fk_client.ee_position(active_joints, q)
+            p_ee = b + p_ee_local
+            r = p_ee - p_o
+            ee_o_dist = np.linalg.norm(r)
+            object_base_dist = target_reach_distance(b, p_o)
+            last_ee_dist = ee_o_dist
+            if min_ee_dist is None or ee_o_dist < min_ee_dist:
+                min_ee_dist = ee_o_dist
+
+        rospy.loginfo("Rollout step %d: ee_obj_dist=%.3f, object_base_dist=%.3f", k, ee_o_dist, object_base_dist)       
+        k += 1
+
+        rospy.loginfo("dt=%.3f, tau=%s, object_dt=%.3f, min_ee_dist=%.3f, last_ee_dist=%.3f, p_o=%s, b=%s, ee_pos=%s, ee_local_pos=%s", cfg.dt, tau, o_dt, min_ee_dist, last_ee_dist, p_o, b, p_ee, p_ee_local)
+        rospy.loginfo(
+            "Object/base reach distance %.3f m; allowed [%.3f, %.3f] m ; tau=%s; last valid rollout length %d",
+            object_base_dist, cfg.reach_min, cfg.reach_max, tau, last_valid_len
+        )
+        with open(out_path, "a") as f:
+                        f.write(
+                            f"{cfg.dt},{float(o_dt)},{float(min_ee_dist)},"
+                            f"{p_o},{b},{p_ee},{p_ee_local}\n"
+                        )
+        last_valid_len = k + 1
+        rospy.loginfo("Rollout step %d/%d: r=%s, norm(r)=%s", k, N, r, np.linalg.norm(r))
+
+    f.close()
+
+    if last_valid_len > 0:
+        q_hist = q_hist[:last_valid_len]
+        b_hist = b_hist[:last_valid_len]
+        r_hist = r_hist[:last_valid_len]
+    record_entry_outcome("position_only" if saw_position_goal else "no_position_entry")
+    if cfg.require_final_reachable and last_reach_dist is not None and not is_target_reachable(
+            last_reach_dist,
+            cfg.reach_min,
+            cfg.reach_max,
+            cfg.reach_margin,
+    ):
+        raise RuntimeError(
+            "micro-g DGM rollout: final object/base distance {:.3f} outside reach shell [{:.3f}, {:.3f}]".format(
+                last_reach_dist,
+                cfg.reach_min,
+                cfg.reach_max,
+            )
+        )
+    return traj, q_hist, b_hist, r_hist
