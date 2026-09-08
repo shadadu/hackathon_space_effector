@@ -51,12 +51,12 @@ class ObjectSimulator:
         self.vz = float(rospy.get_param("~vz", 0.00))
 
         # Workspace box to keep object in reachable region
-        self.x_min = float(rospy.get_param("~x_min", -1.0))
-        self.x_max = float(rospy.get_param("~x_max", 5.0))
-        self.y_min = float(rospy.get_param("~y_min", -1.0))
-        self.y_max = float(rospy.get_param("~y_max", 2.0))
-        self.z_min = float(rospy.get_param("~z_min", -1.0))
-        self.z_max = float(rospy.get_param("~z_max", 1.0))
+        self.x_min = float(rospy.get_param("~x_min", -5.00))
+        self.x_max = float(rospy.get_param("~x_max", 10.00))
+        self.y_min = float(rospy.get_param("~y_min", -5.0))
+        self.y_max = float(rospy.get_param("~y_max", 5.00))
+        self.z_min = float(rospy.get_param("~z_min", -1.00))
+        self.z_max = float(rospy.get_param("~z_max", 1.00))
         
         # self.x_min = float(rospy.get_param("~x_min", 0.35))
         # self.x_max = float(rospy.get_param("~x_max", 0.65))
