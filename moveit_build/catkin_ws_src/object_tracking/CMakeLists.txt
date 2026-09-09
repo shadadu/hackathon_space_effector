@@ -71,6 +71,7 @@ catkin_install_python(
     src/micro_g_dgm_intercept_planner.py
     src/micro_g_dgm_planner_node.py
     src/micro_g_dgm_training.py
+    src/micro_g_dgm_inference_trials.py
   DESTINATION ${CATKIN_PACKAGE_BIN_DESTINATION}
 )
 

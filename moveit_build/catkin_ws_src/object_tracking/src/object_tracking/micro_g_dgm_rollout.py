@@ -399,6 +399,7 @@ def rollout_micro_g_dgm_persistent_policy(
         cfg: MicroGRolloutConfig,
         fk_client: Any = None,
         object_state_provider: Optional[Callable[[], Optional[Odometry]]] = None,
+        step_records: Optional[list] = None,
 ) -> Tuple[RobotTrajectory, np.ndarray, np.ndarray, np.ndarray]:
     """
     Roll out the micro-g value policy with state (q, b, r, v_o, tau).
@@ -421,6 +422,8 @@ def rollout_micro_g_dgm_persistent_policy(
     rospy.loginfo("Rollout micro-g DGM policy config: %s", cfg)
     q = np.asarray(q0, dtype=np.float64).reshape(7).copy()
     b = np.asarray(b0, dtype=np.float64).reshape(3).copy()
+    if step_records is not None:
+        step_records.clear()
     p_o, v_o, stamp = object_state_from_odom(object_odom)
 
     if not np.isfinite(cfg.T) or cfg.T <= 0.0:
@@ -446,7 +449,7 @@ def rollout_micro_g_dgm_persistent_policy(
     ###### GET initial fk_client position and distance to object
     k=0
     t_s = k * cfg.dt
-    TOL=0.15
+    TOL=cfg.grasp_pos_tol
 
     latest_odom = get_latest_object_state(object_odom, object_state_provider)
     p_o = None
@@ -479,7 +482,7 @@ def rollout_micro_g_dgm_persistent_policy(
     ######
     
 
-    while (k < N) and (np.linalg.norm(r) > TOL):
+    while (k < N) and (np.linalg.norm(r) > cfg.grasp_pos_tol):
         rospy.loginfo("Initiate a Rollout step %d/%d: r=%s, norm(r)=%s", k, N, r, np.linalg.norm(r))
         
 
@@ -554,7 +557,8 @@ def rollout_micro_g_dgm_persistent_policy(
         u_q = np.asarray(u_q, dtype=np.float64).reshape(7)
         u_b = np.asarray(u_b, dtype=np.float64).reshape(3)
 
-        if not np.all(np.isfinite(u_q)) or not np.all(np.isfinite(u_b)):
+        nonfinite_control = not np.all(np.isfinite(u_q)) or not np.all(np.isfinite(u_b))
+        if nonfinite_control:
             nan_hits += 1
             if nan_hits > cfg.max_nan_guard:
                 raise RuntimeError("micro-g DGM rollout: too many non-finite controls")
@@ -586,7 +590,7 @@ def rollout_micro_g_dgm_persistent_policy(
         if position_ready and velocity_ready:
             record_entry_outcome("grasp_ready")
             rospy.loginfo("Rollout step %d/%d and ee obj distance %.3f: position and velocity ready; returning early", k, N, np.linalg.norm(r))
-            # return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
+            return traj, q_hist[:k + 1], b_hist[:k + 1], r_hist[:k + 1]
         if position_ready:
             rospy.logwarn_throttle(
                 1.0,
@@ -596,6 +600,8 @@ def rollout_micro_g_dgm_persistent_policy(
             )
 
         if k < N - 1:
+            q_before = q.copy()
+            b_before = b.copy()
             q = q + dt * u_q
             b = b + dt * u_b
             if cfg.joint_min is not None and cfg.joint_max is not None:
@@ -615,6 +621,15 @@ def rollout_micro_g_dgm_persistent_policy(
             last_ee_dist = ee_o_dist
             if min_ee_dist is None or ee_o_dist < min_ee_dist:
                 min_ee_dist = ee_o_dist
+
+            if step_records is not None:
+                step_records.append({
+                    "k": int(k), "t": float(t_s), "dt": float(dt),
+                    "q": q_before, "b": b_before, "p_o": p_o.copy(),
+                    "r": r_hist[k].copy(), "u_q": u_q.copy(), "u_b": u_b.copy(),
+                    "v_rel": v_rel.copy(), "q_after": q.copy(), "b_after": b.copy(),
+                    "r_after": r.copy(), "nonfinite_control": nonfinite_control,
+                })
 
         rospy.loginfo("Rollout step %d: ee_obj_dist=%.3f, object_base_dist=%.3f", k, ee_o_dist, object_base_dist)       
         k += 1
