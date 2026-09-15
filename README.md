@@ -60,10 +60,32 @@ service itself. Start the micro-g planner and intercept nodes together with:
 
 `roslaunch object_tracking micro_g_dgm_intercept.launch T:=2.0 model_path:=/root/catkin_ws/src/object_tracking/models/micro_g_dgm_v1.pkl`
 
+`bring_up.sh` already starts the micro-g planner. When using that stack, launch
+only the intercept client to avoid replacing the running planner:
+
+`roslaunch object_tracking micro_g_dgm_intercept.launch start_planner:=false`
+
+With `start_planner:=false`, planner settings such as `T` and `model_path` come
+from the running server; launch arguments do not reconfigure it.
+
 To run the nodes in separate terminals, start `micro_g_dgm_planner_node.py` first,
 then `micro_g_dgm_intercept_planner.py`. Verify the endpoint with:
 
 `rosservice info /micro_g_dgm/get_motion_plan`
+
+## Running Micro-g DGM benchmark tests
+
+After launching the containers with `bring_up.sh`, and running `./load_pretrained_mdl_docker_micro_g.sh` to load the model,
+
+`rosrun object_tracking micro_g_dgm_inference_trials.py \
+  _M:=100 \
+  _seed:=0 \
+  _model_path:=/root/catkin_ws/src/object_tracking/models/micro_g_dgm_v1.pkl`
+
+`rosrun object_tracking micro_g_dgm_inference_trials. py \
+  _M:=100 \
+  '_grasp_pos_tols:=[0.05,0.1,0.5,0.75,1.0,1.5,2.0,2.5,3.0]'`
+
 
 
 # Perfomance Update
