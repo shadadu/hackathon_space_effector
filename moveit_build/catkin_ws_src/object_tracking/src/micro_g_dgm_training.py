@@ -294,9 +294,9 @@ def main():
     if grad_clip_norm <= 0.0:
         raise ValueError("~grad_clip_norm must be positive")
     hidden = int(rospy.get_param("~hidden", 220))
-    depth = int(rospy.get_param("~depth", 28))
+    depth = int(rospy.get_param("~depth", 36))
     architecture = str(rospy.get_param("~architecture", "piratenet")).strip().lower()
-    pirate_blocks = int(rospy.get_param("~pirate_blocks", 4))
+    pirate_blocks = int(rospy.get_param("~pirate_blocks", 6))
     fourier_scale = float(rospy.get_param("~fourier_scale", 1.0))
     physics_init = as_bool(rospy.get_param("~physics_init", True))
     seed = int(rospy.get_param("~seed", 0))
