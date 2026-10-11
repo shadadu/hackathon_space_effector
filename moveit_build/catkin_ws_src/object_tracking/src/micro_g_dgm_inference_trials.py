@@ -259,7 +259,8 @@ def main():
                 vrel.append(jac.dot(uq_used[i]) + base_u - vo)
             position_ready = [x <= tol for x in rnorms]
             velocity_ready = [np.linalg.norm(x) <= grasp_vel_tol for x in vrel]
-            grasp_ready = [position_ready[i] and i < len(velocity_ready) and velocity_ready[i] for i in range(len(position_ready))]
+            # grasp_ready = [position_ready[i] and i < len(velocity_ready) and velocity_ready[i] for i in range(len(position_ready))]
+            grasp_ready = [position_ready[i] for i in range(len(position_ready))]
             first_pos, first_grasp = first_index(position_ready), first_index(grasp_ready)
             end_valid = state_valid(validity, group_name, names, qs[-1])
             joint_margin = float(np.min(np.minimum(np.asarray(qs) - JMIN, JMAX - np.asarray(qs))))

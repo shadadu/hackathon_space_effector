@@ -24,6 +24,14 @@ def test_zero_alpha_makes_every_block_an_identity():
     np.testing.assert_allclose(piratenet_features(params, x), embedding, rtol=1e-6, atol=1e-6)
 
 
+def test_output_layer_starts_zero_and_is_stable():
+    params = init_piratenet_params(jax.random.PRNGKey(7), in_dim=3, hidden=8, blocks=2)
+    np.testing.assert_allclose(params["output"]["w"], 0.0, atol=1e-6)
+    np.testing.assert_allclose(params["output"]["b"], 0.0, atol=1e-6)
+    assert bool(jnp.all(jnp.isfinite(apply_value(params, jnp.ones((4, 3), dtype=jnp.float32)))))
+    np.testing.assert_allclose(apply_value(params, jnp.ones((4, 3), dtype=jnp.float32)), 0.0, atol=1e-6)
+
+
 def test_value_gradient_is_finite_in_physical_coordinates():
     params = init_piratenet_params(
         jax.random.PRNGKey(1), in_dim=3, hidden=8, blocks=2,

@@ -37,7 +37,12 @@ def init_piratenet_params(
         input_min=None,
         input_max=None,
 ):
-    """Initialize a PirateNet whose residual blocks are identities at step zero."""
+    """Initialize a PirateNet whose residual blocks are identities at step zero.
+
+    The output layer is intentionally zero-initialized so training starts from a
+    neutral value function instead of a random readout that can destabilize the
+    PDE objective for small or large seeds.
+    """
     if hidden <= 0 or hidden % 2:
         raise ValueError("PirateNet hidden size must be a positive even integer")
     if blocks <= 0:
@@ -50,7 +55,9 @@ def init_piratenet_params(
     if np.any(np.asarray(input_max) <= np.asarray(input_min)):
         raise ValueError("Each PirateNet input maximum must exceed its minimum")
 
-    def dense(k, din, dout):
+    def dense(k, din, dout, zero_init=False):
+        if zero_init:
+            return {"w": jnp.zeros((din, dout), dtype=jnp.float32), "b": jnp.zeros((dout,), dtype=jnp.float32)}
         limit = jnp.sqrt(6.0 / float(din + dout))
         return {
             "w": jax.random.uniform(k, (din, dout), minval=-limit, maxval=limit, dtype=jnp.float32),
@@ -71,7 +78,7 @@ def init_piratenet_params(
             "layers": [dense(next(keys), hidden, hidden) for _ in range(3)],
             "alpha": jnp.array(0.0, dtype=jnp.float32),
         })
-    params["output"] = dense(next(keys), hidden, 1)
+    params["output"] = dense(next(keys), hidden, 1, zero_init=True)
     return params
 
 
