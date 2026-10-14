@@ -145,6 +145,11 @@ def main():
     result_path = Path(rospy.get_param("~results_path", str(results_dir / "micro_g_dgm_inference_trials.csv")))
     rospy.set_param("~out_path", str(results_dir / "micro_g_dgm_inference_step_path.csv"))
 
+    summary_stats = {
+        "total_trials": 0, "successes": 0, "failures": 0,
+        "position_only": 0, "grasp_ready": 0,
+    }
+
     M = int(rospy.get_param("~M", 100))
     if M <= 0:
         raise ValueError("~M must be positive")
@@ -207,16 +212,19 @@ def main():
                 reach_min=reach_min, reach_max=reach_max,
                 require_final_reachable=False,
             )
+            rospy.loginfo("Trial %d with config %s", start_id, cfg)
             odom = make_odom(p0, vo, world_frame)
             started = time.perf_counter()
             error_type = error_message = ""
             termination = "unknown"
             step_records = []
-            try:
+            try: 
+                rospy.loginfo("Inference trial %d: Starting rollout with q0=%s, b0=%s, p0=%s, vo=%s", start_id, q0, b0, p0, vo)
                 traj, q_hist, b_hist, _ = rollout_micro_g_dgm_persistent_policy(
                     model, q0, b0, odom, names, group, cfg, fk_client=fk_client,
                     step_records=step_records,
                 )
+                rospy.loginfo("Inference trial %d: Rollout completed with %d steps", start_id, len(step_records))
                 termination = "position_tolerance" if len(traj.joint_trajectory.points) < int(np.ceil(T / dt)) + 1 else "timeout"
             except Exception as exc:
                 traj = None
@@ -261,6 +269,12 @@ def main():
             velocity_ready = [np.linalg.norm(x) <= grasp_vel_tol for x in vrel]
             # grasp_ready = [position_ready[i] and i < len(velocity_ready) and velocity_ready[i] for i in range(len(position_ready))]
             grasp_ready = [position_ready[i] for i in range(len(position_ready))]
+            summary_stats["total_trials"] += 1
+            summary_stats["successes"] += int(any(grasp_ready))
+            summary_stats["failures"] += int(not any(grasp_ready))
+            summary_stats["position_only"] += int(any(position_ready) and not any(grasp_ready))
+            summary_stats["grasp_ready"] += int(any(grasp_ready))
+            
             first_pos, first_grasp = first_index(position_ready), first_index(grasp_ready)
             end_valid = state_valid(validity, group_name, names, qs[-1])
             joint_margin = float(np.min(np.minimum(np.asarray(qs) - JMIN, JMAX - np.asarray(qs))))
@@ -308,6 +322,9 @@ def main():
             row.update(quat("ee_orientation_start", ee_poses[0].orientation)); row.update(quat("ee_orientation_end", ee_poses[-1].orientation))
             rows.append(row)
             rospy.loginfo("Trial %d tol %.3f: min |r|=%.4f success=%s", start_id, tol, rnorms[imin], row["success"])
+
+    stats_string = ", ".join(f"{k}={v}" for k, v in summary_stats.items())
+    rospy.loginfo("Completed %d trials with tolerances %s; summary: %s", M, tolerances, stats_string)
 
     write_header = not result_path.exists() or result_path.stat().st_size == 0
     with result_path.open("a", newline="") as stream:
